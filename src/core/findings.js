@@ -28,11 +28,11 @@ export function assessSignals(findings = []) {
 }
 
 function assessmentFor(findings) {
-  if (findings.length === 0) return 'not-assessed';
+  if (findings.length === 0) return 'non-assessed';
 
   const assessments = new Set(findings.map((finding) => finding.assessment));
   if (assessments.has('unavailable')) return 'unavailable';
   if (assessments.has('unknown')) return 'unknown';
-  if (assessments.has('not-assessed')) return 'not-assessed';
+  if (assessments.has('non-assessed')) return 'non-assessed';
   return 'assessed';
 }

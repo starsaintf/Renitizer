@@ -74,7 +74,7 @@ test('makeReport assesses visual-address and reverse-image signals', () => {
 
   assert.deepEqual(report.signals.visualAddress, { assessment: 'assessed', findings: [visualAddress] });
   assert.deepEqual(report.signals.reverseImage, { assessment: 'unknown', findings: [reverseImage] });
-  assert.deepEqual(report.signals.device, { assessment: 'not-assessed', findings: [] });
+  assert.deepEqual(report.signals.device, { assessment: 'non-assessed', findings: [] });
 });
 
 test('makeReport preserves an unavailable signal assessment', () => {
