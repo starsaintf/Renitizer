@@ -40,10 +40,18 @@ export function createSafeShareReport({ report = {}, verification = null, findin
     summary: {
       safetyScore: report.safetyScore ?? null,
       counts: report.counts ?? { total: 0, unresolved: 0, resolved: 0 },
-      signals: report.signals ?? {},
+      signals: summarizeSignals(report.signals),
       readiness: verification?.readiness ?? null,
+      audioRedactions: report.audioRedactions ?? [],
     },
   };
   if (includeDetailedFindings) payload.findings = findings;
   return payload;
+}
+
+function summarizeSignals(signals = {}) {
+  return Object.fromEntries(Object.entries(signals).map(([name, value]) => [name, {
+    assessment: value?.assessment ?? null,
+    count: Array.isArray(value?.findings) ? value.findings.length : Number(value) || 0,
+  }]));
 }

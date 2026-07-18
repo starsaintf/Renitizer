@@ -6,6 +6,7 @@ import { requestCloudAnalysis } from './scanners/cloud.js';
 import { runScanners } from './scanners/orchestrator.js';
 import { sanitizeRasterImage } from './sanitize/image.js';
 import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
+import { getAudioProcessingState, inspectAudioFile, resolveAudioRedactionPlan, sanitizeAudioFile } from './sanitize/audio.js';
 import { makeReport } from './core/report.js';
 import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
@@ -15,12 +16,12 @@ import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createD
 import { documentUiCopy } from './documents/presentation.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null };
+const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, audio: { duration: null, manualRanges: [], processing: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
-ui['file-input'].addEventListener('change', () => selectFile(ui['file-input'].files[0]));
+ui['file-input'].addEventListener('change', () => { void selectFile(ui['file-input'].files[0]); });
 ui['scan-button'].addEventListener('click', localScan);
 ui['deep-scan-button'].addEventListener('click', deepScan);
 ui['sanitize-button'].addEventListener('click', cleanSelectedFile);
@@ -30,6 +31,7 @@ ui['cloud-button'].addEventListener('click', cloudScan);
 ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
 ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); invalidateCleanVerification(); updateReport(); });
+ui['add-audio-range-button'].addEventListener('click', addManualAudioRange);
 ui['share-expiry'].addEventListener('change', () => { state.share = null; renderShareSection(); });
 ui['share-detailed-findings'].addEventListener('change', () => { state.share = null; renderShareSection(); });
 ui['share-package-button'].addEventListener('click', createEncryptedPackage);
@@ -45,7 +47,7 @@ function renderView() {
   else document.title = 'Renitizer · clean before you share';
 }
 
-function selectFile(file) {
+async function selectFile(file) {
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.file = file || null;
   state.cleanFile = null;
@@ -57,8 +59,10 @@ function selectFile(file) {
   state.documentPlan = null;
   state.documentRequest = null;
   state.documentReport = null;
+  state.audio = { duration: null, manualRanges: [], processing: null };
   ui['file-summary'].textContent = file ? `${file.name} · ${formatBytes(file.size)}` : 'No file selected yet.';
   const isImage = Boolean(file?.type.startsWith('image/'));
+  const isAudio = Boolean(file?.type.startsWith('audio/'));
   const documentType = documentTypeForFile(file);
   const isDocument = Boolean(documentType);
   if (isDocument) {
@@ -68,8 +72,8 @@ function selectFile(file) {
   }
   ui['scan-button'].disabled = !file;
   ui['deep-scan-button'].disabled = !file;
-  ui['sanitize-button'].disabled = !isImage && !isDocument;
-  ui['sanitize-button'].textContent = isDocument ? documentUiCopy(documentType).actionLabel : 'Make a clean copy';
+  ui['sanitize-button'].disabled = !isImage && !isDocument && !isAudio;
+  ui['sanitize-button'].textContent = isDocument ? documentUiCopy(documentType).actionLabel : isAudio ? 'Remove private audio' : 'Make a clean copy';
   ui['download-button'].disabled = true;
   ui['report-button'].disabled = true;
   updateCloudButton();
@@ -80,10 +84,33 @@ function selectFile(file) {
   ui['sanitize-note'].textContent = '';
   ui['save-copy'].textContent = isDocument
     ? documentUiCopy(documentType).saveCopy
+    : isAudio
+    ? 'Choose the spoken parts to mute or bleep. We will only say a clean copy exists after its WAV file is created.'
     : isImage
     ? 'For supported images, make a metadata-free copy and choose which marked areas to blur or cover.'
     : 'This kind of file can be checked, but we cannot make a clean copy for it in this browser. You can still save a check summary in More checks.';
   render();
+  if (isAudio) {
+    const selectedFile = file;
+    const processing = getAudioProcessingState(file);
+    state.audio.processing = processing;
+    ui['sanitize-button'].disabled = !processing.available;
+    ui['sanitize-note'].textContent = processing.message;
+    renderAudioAdvanced();
+    if (processing.available) {
+      try {
+        const inspected = await inspectAudioFile(file);
+        if (state.file !== selectedFile) return;
+        state.audio = { ...state.audio, ...inspected };
+        renderAudioAdvanced();
+      } catch (error) {
+        if (state.file !== selectedFile) return;
+        state.audio.processing = { state: 'unavailable', available: false, message: 'This audio file could not be decoded in this browser. You can still save its check summary.' };
+        ui['sanitize-button'].disabled = true;
+        ui['sanitize-note'].textContent = state.audio.processing.message;
+      }
+    }
+  }
 }
 
 async function localScan() {
@@ -115,7 +142,33 @@ async function deepScan() {
 
 async function cleanSelectedFile() {
   if (documentTypeForFile(state.file)) return prepareDocumentCleaningRequest();
+  if (state.file?.type.startsWith('audio/')) return cleanAudio();
   return cleanImage();
+}
+
+async function cleanAudio() {
+  if (!state.file || !state.audio.processing?.available || !state.audio.duration) return;
+  const plan = resolveAudioRedactionPlan({ findings: state.findings, manualRanges: state.audio.manualRanges, duration: state.audio.duration });
+  if (!plan.length) { ui['sanitize-note'].textContent = 'Choose at least one time range to mute or bleep before making a clean copy.'; return; }
+  busy(ui['sanitize-button'], 'Removing private audio…');
+  try {
+    const cleanBlob = await sanitizeAudioFile(state.file, plan);
+    if (!(cleanBlob instanceof Blob) || !cleanBlob.size) throw new Error('No clean audio file was produced.');
+    state.cleanFile = new File([cleanBlob], `${state.file.name.replace(/\.[^.]+$/, '')}-clean.wav`, { type: 'audio/wav' });
+    const selected = new Set(plan.map((item) => item.id));
+    const manualFindings = state.audio.manualRanges.map((range) => ({ id: range.id, category: 'audio-redaction', title: 'Manual audio redaction', detail: 'A manually selected audio range.', severity: 'medium', confidence: 1, assessment: 'assessed', timeRange: { start: range.start, end: range.end }, redactionAction: range.action, resolved: selected.has(range.id) }));
+    state.findings = [...state.findings.map((finding) => selected.has(finding.id) ? { ...finding, resolved: true } : finding), ...manualFindings];
+    state.share = null;
+    state.verification = null;
+    ui['clean-status'].textContent = `Clean WAV copy created with ${plan.length} selected range${plan.length === 1 ? '' : 's'}.`;
+    ui['sanitize-note'].textContent = 'Your WAV clean copy is ready to save. Review it before sharing.';
+    ui['download-button'].disabled = false;
+    updateReport();
+  } catch (error) {
+    state.cleanFile = null;
+    ui['download-button'].disabled = true;
+    ui['sanitize-note'].textContent = 'We could not create a clean WAV copy in this browser. Your original audio was not changed.';
+  } finally { idle(ui['sanitize-button'], 'Remove private audio'); }
 }
 
 async function cleanImage() {

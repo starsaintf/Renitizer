@@ -1,5 +1,6 @@
 import { assessSignals } from './findings.js';
 import { calculateRisk } from './risk-score.js';
+import { resolvedAudioRanges } from '../sanitize/audio.js';
 
 export function makeReport(findings = []) {
   const residualRisks = findings.filter((finding) => !finding.resolved);
@@ -13,5 +14,6 @@ export function makeReport(findings = []) {
       resolved: findings.length - residualRisks.length,
     },
     signals: assessSignals(findings),
+    audioRedactions: resolvedAudioRanges(findings),
   };
 }
