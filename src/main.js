@@ -78,7 +78,8 @@ async function cloudScan() {
   busy(ui['cloud-button'], 'Sending…');
   ui['cloud-status'].textContent = 'Sending selected file to your configured endpoint…';
   try {
-    const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), file: state.file, analyses: ['visual-pii', 'audio-pii', 'video-context'], consent: ui['cloud-consent'].checked });
+    const cloudFiles = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : [state.file];
+    const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], consent: ui['cloud-consent'].checked });
     state.findings = [...state.findings, ...cloudFindings];
     ui['cloud-status'].textContent = `Cloud analysis returned ${cloudFindings.length} normalized finding(s).`;
     updateReport();
@@ -115,6 +116,33 @@ function download(blob, name) { const url = URL.createObjectURL(blob); const lin
 function busy(button, label) { button.disabled = true; button.dataset.label = button.textContent; button.textContent = label; }
 function idle(button, label) { button.disabled = false; button.textContent = label; }
 function formatBytes(bytes) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
+
+async function extractVideoFrames(file) {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.src = url; video.muted = true; video.playsInline = true;
+  try {
+    await waitFor(video, 'loadeddata');
+    if (!video.videoWidth || !video.videoHeight) throw new Error('This browser could not decode video frames. Configure a dedicated cloud video endpoint instead.');
+    if (!Number.isFinite(video.duration) || video.duration <= 0) throw new Error('This video has no seekable duration. Configure a dedicated cloud video endpoint instead.');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    const times = [...new Set([0, video.duration * 0.5, Math.max(0, video.duration - 0.1)].map((time) => Math.min(Math.max(time, 0), Math.max(video.duration - 0.01, 0))))];
+    const frames = [];
+    for (const [index, time] of times.entries()) {
+      if (index > 0) {
+        video.currentTime = time;
+        await waitFor(video, 'seeked');
+      }
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const blob = await new Promise((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('This browser could not encode sampled video frames. Configure a dedicated cloud video endpoint instead.')), 'image/jpeg', 0.85));
+      frames.push(new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-frame-${frames.length + 1}.jpg`, { type: 'image/jpeg' }));
+    }
+    return frames;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function waitFor(target, event) { return new Promise((resolve, reject) => { target.addEventListener(event, resolve, { once: true }); target.addEventListener('error', () => reject(new Error('Video frame sampling is not supported for this file. Configure a dedicated cloud video endpoint instead.')), { once: true }); }); }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(() => {});
 render();

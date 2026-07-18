@@ -1,12 +1,13 @@
 const requiredFields = ['id', 'category', 'title', 'detail', 'severity', 'confidence'];
 
-export async function requestCloudAnalysis({ endpoint, file, analyses, consent }) {
+export async function requestCloudAnalysis({ endpoint, file, files, analyses, consent }) {
   if (!consent) throw new Error('Cloud analysis requires explicit consent.');
   if (!endpoint) throw new Error('Enter a cloud analysis endpoint before sending a file.');
-  if (!file) throw new Error('Choose a file before requesting cloud analysis.');
+  const selectedFiles = files || (file ? [file] : []);
+  if (!selectedFiles.length) throw new Error('Choose a file before requesting cloud analysis.');
 
   const form = new FormData();
-  form.append('file', file, file.name);
+  for (const selectedFile of selectedFiles) form.append('file', selectedFile, selectedFile.name);
   form.append('analyses', JSON.stringify(analyses));
   const response = await fetch(endpoint, { method: 'POST', body: form, headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`Cloud analysis failed (${response.status}).`);
