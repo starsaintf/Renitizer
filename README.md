@@ -18,6 +18,11 @@ Serve the repository root with any static server, then open `index.html`. For ex
 - Audio: accepted for a report-only local workflow and, only after explicit consent, sent to the Worker transcription path. The Worker detects transcript email, phone, street-address, and name cues.
 - Video: the browser locally samples up to three image frames and sends those frames to the existing cloud vision path only after explicit consent. If the browser cannot decode or encode frames, it reports that a dedicated cloud video endpoint is required.
 - Canvas clean copies: supported raster images only. They remove embedded metadata by re-encoding pixels but do not redact visible content.
+- Secure sharing: after a clean copy is ready, the optional **Share safely** section creates a browser-local AES-256-GCM encrypted package and a separate recovery-key file. The package envelope never contains the key, original filename, or raw findings unless the user explicitly includes detailed findings. The expiry is package metadata, not remotely enforceable deletion.
+
+### Encrypted-package delivery boundary
+
+Renitizer does not provide share storage, uploads, or public links by default. The current delivery state is explicitly **unconfigured**: users download an encrypted package and choose how to send it themselves. A configured sharing backend would need to store only the secret-free envelope and define authenticated retrieval, expiry enforcement, revocation, and key exchange; it must not be implied by the local package flow.
 
 ## Optional cloud worker
 

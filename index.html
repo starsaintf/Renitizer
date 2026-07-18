@@ -84,6 +84,17 @@
             <summary>Verification details</summary>
             <div id="verification-checks"></div>
           </details>
+          <section id="share-section" class="share-section" hidden aria-labelledby="share-title">
+            <div><p class="step-number">Optional</p><h3 id="share-title">Share safely</h3></div>
+            <p>Create an encrypted package for the clean copy. This app does not upload it or create a public link.</p>
+            <label class="field-label" for="share-expiry">Package expiry</label>
+            <select id="share-expiry"><option value="1-day">1 day</option><option value="7-days" selected>7 days</option><option value="30-days">30 days</option></select>
+            <p class="microcopy">Expiry is recorded in the package, but a downloaded file cannot enforce deletion after you send it.</p>
+            <label class="consent"><input id="share-detailed-findings" type="checkbox"><span>Include detailed findings in the encrypted privacy report.</span></label>
+            <div class="actions"><button id="share-package-button" class="button primary" type="button" disabled>Create &amp; download encrypted package</button><button id="share-key-button" class="button quiet" type="button" disabled>Save recovery key</button><button id="share-report-button" class="text-button" type="button" disabled>Download privacy report</button></div>
+            <p id="share-delivery" class="microcopy"></p>
+            <p id="share-status" class="microcopy" aria-live="polite"></p>
+          </section>
         </section>
 
         <details class="more-options">

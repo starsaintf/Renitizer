@@ -9,10 +9,12 @@ import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js'
 import { makeReport } from './core/report.js';
 import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
+import { encryptCleanCopy } from './share/crypto.js';
+import { createSafeShareReport, getShareState } from './share/policy.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'verification-details', 'verification-checks'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set() };
+const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set(), share: null };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -26,6 +28,11 @@ ui['cloud-button'].addEventListener('click', cloudScan);
 ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
 ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); invalidateCleanVerification(); updateReport(); });
+ui['share-expiry'].addEventListener('change', () => { state.share = null; renderShareSection(); });
+ui['share-detailed-findings'].addEventListener('change', () => { state.share = null; renderShareSection(); });
+ui['share-package-button'].addEventListener('click', createEncryptedPackage);
+ui['share-key-button'].addEventListener('click', downloadRecoveryKey);
+ui['share-report-button'].addEventListener('click', downloadShareReport);
 window.addEventListener('hashchange', renderView);
 
 function renderView() {
@@ -43,6 +50,7 @@ function selectFile(file) {
   state.findings = [];
   state.report = null;
   state.verification = null;
+  state.share = null;
   state.availableChecks = new Set();
   ui['file-summary'].textContent = file ? `${file.name} · ${formatBytes(file.size)}` : 'No file selected yet.';
   const isImage = Boolean(file?.type.startsWith('image/'));
@@ -54,6 +62,7 @@ function selectFile(file) {
   updateCloudButton();
   ui['results-step'].hidden = true;
   ui['save-step'].hidden = true;
+  ui['share-section'].hidden = true;
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
   ui['save-copy'].textContent = isImage
@@ -91,6 +100,7 @@ async function cleanImage() {
     const beforeFindings = state.findings;
     const redactionPlan = resolveRedactionPlan(beforeFindings);
     state.cleanFile = await sanitizeRasterImage(state.file, redactionPlan);
+    state.share = null;
     state.findings = state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding);
     const postClean = await rerunCleanScanners(state.cleanFile, state.availableChecks);
     state.verification = createVerification({ beforeFindings, afterFindings: postClean.findings, assessedChecks: postClean.assessedChecks, redactionPlan });
@@ -119,7 +129,7 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification }; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); }
+function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification }; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); renderShareSection(); }
 
 function render() {
   ui.findings.replaceChildren();
@@ -174,9 +184,11 @@ function friendlyCheckName(check) {
 function invalidateCleanVerification() {
   state.cleanFile = null;
   state.verification = null;
+  state.share = null;
   ui['download-button'].disabled = true;
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
+  renderShareSection();
 }
 
 function renderRedactionPreview() {
@@ -240,7 +252,54 @@ function friendlyFinding(finding) {
 }
 
 function downloadCleanCopy() { download(state.cleanFile, state.cleanFile.name, state.cleanFile.type); }
-function downloadReport() { download(new Blob([JSON.stringify({ generatedAt: new Date().toISOString(), file: state.file?.name, ...state.report, findings: state.findings }, null, 2)], { type: 'application/json' }), `${state.file?.name || 'renitizer'}-privacy-report.json`, 'application/json'); }
+function downloadReport() { downloadPrivacyReport({ includeDetailedFindings: false }); }
+function renderShareSection() {
+  const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
+  ui['share-section'].hidden = !state.cleanFile;
+  ui['share-package-button'].disabled = !shareState.available;
+  ui['share-key-button'].disabled = !state.share;
+  ui['share-report-button'].disabled = !shareState.available;
+  ui['share-delivery'].textContent = shareState.message;
+  if (!state.share) ui['share-status'].textContent = '';
+}
+function makeShareReport(shareState) {
+  return createSafeShareReport({
+    report: state.report,
+    verification: state.verification,
+    findings: state.findings,
+    expiresAt: shareState?.expiresAt || null,
+    includeDetailedFindings: ui['share-detailed-findings'].checked,
+  });
+}
+async function createEncryptedPackage() {
+  const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
+  if (!shareState.available) { ui['share-status'].textContent = shareState.message; return; }
+  busy(ui['share-package-button'], 'Encrypting…');
+  try {
+    state.share = await encryptCleanCopy(state.cleanFile, { expiresAt: shareState.expiresAt, report: makeShareReport(shareState) });
+    download(new Blob([JSON.stringify(state.share.envelope, null, 2)], { type: 'application/json' }), 'renitizer-encrypted-package.json', 'application/json');
+    ui['share-status'].textContent = 'Encrypted package downloaded. Save the recovery key separately; it is not inside the package.';
+  } catch (error) {
+    ui['share-status'].textContent = 'This browser could not create an encrypted package.';
+  } finally {
+    idle(ui['share-package-button'], 'Create & download encrypted package');
+    renderShareSection();
+  }
+}
+function downloadRecoveryKey() {
+  if (!state.share) return;
+  download(new Blob([JSON.stringify({ format: 'renitizer-recovery-key-v1', algorithm: 'AES-256-GCM', expiresAt: state.share.envelope.expiresAt, recoveryKey: state.share.recoveryKey }, null, 2)], { type: 'application/json' }), 'renitizer-recovery-key.json', 'application/json');
+  ui['share-status'].textContent = 'Recovery key downloaded. Keep it separate from the encrypted package.';
+}
+function downloadShareReport() {
+  const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
+  if (!shareState.available) return;
+  downloadPrivacyReport({ expiresAt: shareState.expiresAt, includeDetailedFindings: ui['share-detailed-findings'].checked });
+}
+function downloadPrivacyReport({ expiresAt = null, includeDetailedFindings = false } = {}) {
+  const report = createSafeShareReport({ report: state.report, verification: state.verification, findings: state.findings, expiresAt, includeDetailedFindings });
+  download(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), 'renitizer-privacy-report.json', 'application/json');
+}
 function download(blob, name) { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); }
 function busy(button, label) { button.disabled = true; button.textContent = label; }
 function idle(button, label) { button.disabled = false; button.textContent = label; }
