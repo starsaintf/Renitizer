@@ -31,6 +31,10 @@ The static app never has a secret and never automatically uploads a file. To ena
 
 Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or source control.
 
+### Processing-job API prerequisites
+
+`POST /api/jobs` and `GET /api/jobs/:id` provide a metadata-only, in-memory job contract for image, video, audio, and document workflows. They do not upload content or claim that a job was processed. For real asynchronous processing, create a private R2 bucket and a Cloudflare Queue, then uncomment and replace the documented `MEDIA_BUCKET` and `JOBS_QUEUE` bindings in `worker/wrangler.toml`; until both are bound, each status response explicitly reports `processing.state: "unconfigured"`.
+
 ## Native wrappers
 
 - Capacitor: install Capacitor in a wrapper project, point it at this checkout's static web directory (`webDir: "."`), then add Android/iOS platforms. `capacitor.config.json` provides the app identity.

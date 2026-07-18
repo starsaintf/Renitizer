@@ -1,3 +1,18 @@
 name = "renitizer-analysis"
 main = "src/index.js"
 compatibility_date = "2026-07-18"
+
+# Processing-job deployment prerequisites. Keep these disabled for the local
+# metadata-only mock API: it will return processing.state = "unconfigured"
+# until both bindings are supplied in a real deployment.
+#
+# Create the resources first, then replace only the placeholder names below.
+# Do not put credentials, account IDs, or deploy-specific IDs in this file.
+#
+# [[r2_buckets]]
+# binding = "MEDIA_BUCKET"
+# bucket_name = "your-private-media-bucket"
+#
+# [[queues.producers]]
+# binding = "JOBS_QUEUE"
+# queue = "your-processing-jobs-queue"
