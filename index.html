@@ -72,7 +72,11 @@
         <section id="save-step" class="app-card save-step" hidden aria-labelledby="save-title">
           <p class="step-number">Step 3</p>
           <h2 id="save-title">Save your clean copy</h2>
-          <p id="save-copy">For supported images, we can make a fresh copy without embedded file details. It cannot remove visible text, faces, or codes.</p>
+          <p id="save-copy">For supported images, make a metadata-free copy and choose which marked areas to blur or cover.</p>
+          <div id="redaction-editor" class="redaction-editor" hidden>
+            <div class="redaction-toolbar"><strong>Visible details</strong><span>Drag a box to move it. Drag its corner to resize.</span><button id="add-redaction-button" class="text-button" type="button">Add a box</button><button id="apply-all-button" class="text-button" type="button">Blur all marked</button></div>
+            <div id="redaction-preview" class="redaction-preview" aria-label="Image redaction preview"></div>
+          </div>
           <div class="actions"><button id="sanitize-button" class="button primary" type="button" disabled>Make a clean copy</button><button id="download-button" class="button quiet" type="button" disabled>Save clean copy</button></div>
           <p id="sanitize-note" class="microcopy"></p>
           <p id="clean-status" class="visually-hidden" aria-live="polite"></p>

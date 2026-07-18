@@ -1,4 +1,5 @@
 import { capabilityFinding } from './file-facts.js';
+import { normalizePixelBox } from '../sanitize/redaction.js';
 
 export async function scanBarcodes(file) {
   if (!globalThis.BarcodeDetector) {
@@ -13,7 +14,7 @@ export async function scanBarcodes(file) {
       id: `barcode-${index + 1}`, category: code.format === 'qr_code' ? 'qr' : 'barcode',
       title: code.format === 'qr_code' ? 'QR code detected' : 'Barcode detected',
       detail: code.rawValue ? `Encoded value: ${code.rawValue.slice(0, 120)}` : 'A machine-readable code is visible.',
-      severity: 'medium', confidence: 0.95, boundingBox: code.boundingBox,
+      severity: 'medium', confidence: 0.95, boundingBox: normalizePixelBox(code.boundingBox, bitmap.width, bitmap.height),
       recommendation: 'Crop or redact the code before sharing.', assessment: 'assessed', resolved: false,
     }));
   } finally {

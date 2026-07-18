@@ -5,12 +5,13 @@ import { scanOcr } from './scanners/ocr.js';
 import { requestCloudAnalysis } from './scanners/cloud.js';
 import { runScanners } from './scanners/orchestrator.js';
 import { sanitizeRasterImage } from './sanitize/image.js';
+import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
 import { makeReport } from './core/report.js';
 import { getViewFromHash } from './core/view-state.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null };
+const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -22,6 +23,8 @@ ui['download-button'].addEventListener('click', downloadCleanCopy);
 ui['report-button'].addEventListener('click', downloadReport);
 ui['cloud-button'].addEventListener('click', cloudScan);
 ui['cloud-consent'].addEventListener('change', updateCloudButton);
+ui['add-redaction-button'].addEventListener('click', addRedactionBox);
+ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); updateReport(); });
 window.addEventListener('hashchange', renderView);
 
 function renderView() {
@@ -33,6 +36,7 @@ function renderView() {
 }
 
 function selectFile(file) {
+  if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.file = file || null;
   state.cleanFile = null;
   state.findings = [];
@@ -50,7 +54,7 @@ function selectFile(file) {
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
   ui['save-copy'].textContent = isImage
-    ? 'For supported images, we can make a fresh copy without embedded file details. It cannot remove visible text, faces, or codes.'
+    ? 'For supported images, make a metadata-free copy and choose which marked areas to blur or cover.'
     : 'This kind of file can be checked, but we cannot make a clean copy for it in this browser. You can still save a check summary in More checks.';
   render();
 }
@@ -77,7 +81,7 @@ async function cleanImage() {
   if (!state.file) return;
   busy(ui['sanitize-button'], 'Making your copy…');
   try {
-    state.cleanFile = await sanitizeRasterImage(state.file);
+    state.cleanFile = await sanitizeRasterImage(state.file, resolveRedactionPlan(state.findings));
     state.findings = state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding);
     ui['clean-status'].textContent = 'Your clean copy is ready.';
     ui['sanitize-note'].textContent = 'Your clean copy is ready. We checked it again for embedded file details.';
@@ -105,7 +109,7 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = makeReport(state.findings); ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); }
+function updateReport() { state.report = makeReport(state.findings); ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); }
 
 function render() {
   ui.findings.replaceChildren();
@@ -122,10 +126,68 @@ function render() {
     element.querySelector('strong').textContent = friendly.title;
     element.querySelector('p').textContent = friendly.detail;
     element.querySelector('small').textContent = `${finding.resolved ? 'addressed in clean copy' : 'may need your attention'}`;
+    if (finding.boundingBox) {
+      const controls = document.createElement('div');
+      controls.className = 'finding-actions';
+      for (const action of ['blur', 'cover', 'keep']) {
+        const button = document.createElement('button');
+        button.className = 'text-button'; button.type = 'button'; button.textContent = action;
+        button.addEventListener('click', () => { state.findings = setFindingAction(state.findings, finding.id, action); updateReport(); });
+        controls.append(button);
+      }
+      element.querySelector('div').append(controls);
+    }
     ui.findings.append(element);
   }
   const counts = state.report?.counts;
   ui['score-summary'].textContent = counts ? `${counts.unresolved} item${counts.unresolved === 1 ? '' : 's'} may need your attention.` : '';
+}
+
+function renderRedactionPreview() {
+  const isImage = state.file?.type.startsWith('image/');
+  ui['redaction-editor'].hidden = !isImage;
+  if (!isImage) return;
+  if (!state.previewUrl) state.previewUrl = URL.createObjectURL(state.file);
+  ui['redaction-preview'].replaceChildren();
+  const image = document.createElement('img');
+  image.src = state.previewUrl; image.alt = 'Selected image with editable redaction boxes';
+  ui['redaction-preview'].append(image);
+  for (const finding of state.findings.filter((item) => item.boundingBox)) renderRedactionBox(finding);
+}
+
+function addRedactionBox() {
+  const id = `manual-redaction-${Date.now()}`;
+  state.findings = [...state.findings, { id, category: 'identity', title: 'Manual redaction area', detail: 'An area you marked for review.', severity: 'medium', confidence: 1, assessment: 'assessed', resolved: true, redactionAction: 'blur', boundingBox: { x: 0.35, y: 0.35, width: 0.3, height: 0.18 } }];
+  updateReport();
+}
+
+function renderRedactionBox(finding) {
+  const box = document.createElement('div');
+  box.className = 'redaction-box'; box.dataset.id = finding.id; box.dataset.action = finding.redactionAction || 'keep';
+  positionBox(box, finding.boundingBox);
+  const label = document.createElement('label');
+  const select = document.createElement('select');
+  for (const action of ['blur', 'cover', 'keep']) { const option = new Option(action, action, false, finding.redactionAction === action); select.add(option); }
+  select.addEventListener('change', () => { state.findings = setFindingAction(state.findings, finding.id, select.value); updateReport(); });
+  label.append(select); box.append(label);
+  const handle = document.createElement('span'); handle.className = 'redaction-handle'; box.append(handle);
+  box.addEventListener('pointerdown', (event) => editRedactionBox(event, finding.id, handle.contains(event.target)));
+  ui['redaction-preview'].append(box);
+}
+
+function positionBox(element, box) { Object.assign(element.style, { left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.width * 100}%`, height: `${box.height * 100}%` }); }
+
+function editRedactionBox(event, id, resizing) {
+  if (event.target.closest('select')) return;
+  const target = event.currentTarget; const start = { x: event.clientX, y: event.clientY, box: state.findings.find((finding) => finding.id === id).boundingBox };
+  target.setPointerCapture(event.pointerId);
+  const move = (moveEvent) => {
+    const rect = ui['redaction-preview'].getBoundingClientRect(); const dx = (moveEvent.clientX - start.x) / rect.width; const dy = (moveEvent.clientY - start.y) / rect.height;
+    const box = resizing ? { ...start.box, width: Math.max(.03, start.box.width + dx), height: Math.max(.03, start.box.height + dy) } : { ...start.box, x: Math.max(0, Math.min(1 - start.box.width, start.box.x + dx)), y: Math.max(0, Math.min(1 - start.box.height, start.box.y + dy)) };
+    state.findings = state.findings.map((finding) => finding.id === id ? { ...finding, boundingBox: box } : finding); positionBox(target, box);
+  };
+  target.addEventListener('pointermove', move);
+  target.addEventListener('pointerup', () => { target.removeEventListener('pointermove', move); updateReport(); }, { once: true });
 }
 
 function friendlyFinding(finding) {
