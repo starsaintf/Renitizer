@@ -1,4 +1,4 @@
-import { groupSignals } from './findings.js';
+import { assessSignals } from './findings.js';
 import { calculateRisk } from './risk-score.js';
 
 export function makeReport(findings = []) {
@@ -12,6 +12,6 @@ export function makeReport(findings = []) {
       unresolved: residualRisks.length,
       resolved: findings.length - residualRisks.length,
     },
-    signals: groupSignals(findings),
+    signals: assessSignals(findings),
   };
 }
