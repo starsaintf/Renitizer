@@ -3,65 +3,104 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta name="theme-color" content="#090c12">
-    <meta name="description" content="A local-first privacy lab for safer media sharing.">
+    <meta name="theme-color" content="#f8f2e7">
+    <meta name="description" content="A simple, local-first check before sharing a file.">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="stylesheet" href="./styles.css">
-    <title>Renitizer · privacy lab</title>
+    <title>Renitizer · clean before you share</title>
   </head>
   <body>
     <main class="shell">
       <header class="masthead">
-        <a class="brand" href="./" aria-label="Renitizer home"><span class="brand-mark">R</span><span>Renitizer</span></a>
-        <p class="status-pill"><span></span> Local-first privacy lab</p>
+        <a class="brand" href="#home" aria-label="Renitizer home"><span class="brand-mark" aria-hidden="true">R</span><span>Renitizer</span></a>
+        <p class="device-note"><span aria-hidden="true"></span>Your file stays on your device</p>
       </header>
 
-      <section class="hero" aria-labelledby="page-title">
-        <p class="eyebrow">Media privacy, before share</p>
-        <h1 id="page-title">Make the invisible<br><em>reviewable.</em></h1>
-        <p class="lede">Inspect file traces on this device, create a clean image copy, and document what remains. Renitizer reduces exposure; it does not promise anonymity.</p>
+      <section id="home-view" class="home-view" aria-labelledby="home-title">
+        <div class="home-copy">
+          <p class="eyebrow">A little privacy, before you share</p>
+          <h1 id="home-title">Share the picture.<br><em>Keep the extras out.</em></h1>
+          <p class="lede">Renitizer helps you check a file for common private details, then make a cleaner image copy when it can.</p>
+          <a class="button primary start-button" href="#app">Start cleaning <span aria-hidden="true">→</span></a>
+          <p class="reassurance">The standard check happens on your device. Renitizer cannot promise anonymity or remove things already visible in a picture.</p>
+        </div>
+
+        <ol class="friendly-steps" aria-label="How Renitizer works">
+          <li><span>1</span><div><strong>Choose a file</strong><p>Pick an image, audio, or video file.</p></div></li>
+          <li><span>2</span><div><strong>Check for private details</strong><p>See what the standard check finds.</p></div></li>
+          <li><span>3</span><div><strong>Save your clean copy</strong><p>For supported images, keep a fresh copy to share.</p></div></li>
+        </ol>
       </section>
 
-      <section class="workflow" aria-label="Privacy workflow">
-        <div class="stage active"><b>01</b><span>Upload</span></div><i></i><div class="stage"><b>02</b><span>Scan</span></div><i></i><div class="stage"><b>03</b><span>Risks</span></div><i></i><div class="stage"><b>04</b><span>Sanitize</span></div><i></i><div class="stage"><b>05</b><span>Verify</span></div><i></i><div class="stage"><b>06</b><span>Report</span></div>
-      </section>
+      <section id="app-view" class="app-view" hidden aria-labelledby="app-title">
+        <a class="back-link" href="#home">← Home</a>
+        <div class="app-intro">
+          <p class="eyebrow">Your simple three-step check</p>
+          <h1 id="app-title">Clean before you share.</h1>
+          <p>Work through one small step at a time.</p>
+        </div>
 
-      <section class="dashboard">
-        <article class="panel intake-panel">
-          <div class="panel-top"><div><p class="eyebrow">01 / source</p><h2>Add media</h2></div><span class="local-label">stays local</span></div>
-          <label class="dropzone" for="file-input"><input id="file-input" type="file" accept="image/*,audio/*,video/*"><span class="drop-icon">↥</span><strong>Choose a file</strong><small>Images: scan + canvas clean copy<br>Audio/video: capability &amp; optional cloud analysis</small></label>
-          <div id="file-summary" class="file-summary" aria-live="polite">No file selected.</div>
-          <div class="actions"><button id="scan-button" class="button primary" type="button" disabled>Run local scan</button><button id="deep-scan-button" class="button quiet" type="button" disabled>Deep OCR scan</button></div>
-          <p class="microcopy">Local scan reads file facts and embedded metadata in your browser. Deep OCR downloads Tesseract only when you request it.</p>
-        </article>
+        <ol class="progress" aria-label="Cleaning progress">
+          <li class="is-current"><span>1</span>Choose a file</li>
+          <li><span>2</span>Check for private details</li>
+          <li><span>3</span>Save your clean copy</li>
+        </ol>
 
-        <article class="panel score-panel">
-          <p class="eyebrow">Exposure score</p><div class="score"><span id="score-value">—</span><small>/ 100<br>safer</small></div>
-          <p id="score-summary" class="score-summary">Select a file to establish a local baseline.</p>
-          <div class="score-rail"><span id="score-rail"></span></div>
-          <div class="signal-grid" id="signals" aria-label="Privacy signal assessments"></div>
-        </article>
+        <section class="app-card choose-step" aria-labelledby="choose-title">
+          <p class="step-number">Step 1</p>
+          <h2 id="choose-title">Choose a file</h2>
+          <label class="dropzone" for="file-input"><input id="file-input" type="file" accept="image/*,audio/*,video/*"><span class="drop-icon" aria-hidden="true">+</span><strong>Choose a file</strong><small>Images, audio, or video</small></label>
+          <div id="file-summary" class="file-summary" aria-live="polite">No file selected yet.</div>
+        </section>
 
-        <article class="panel findings-panel">
-          <div class="panel-top"><div><p class="eyebrow">02 / evidence</p><h2>Review risks</h2></div><button id="report-button" class="text-button" type="button" disabled>Download report</button></div>
-          <div id="findings" class="findings" aria-live="polite"><p class="empty">Your evidence ledger will appear here after a scan.</p></div>
-        </article>
+        <section class="app-card check-step" aria-labelledby="check-title">
+          <p class="step-number">Step 2</p>
+          <h2 id="check-title">Check for private details</h2>
+          <p>We’ll look for common details that may travel with your file. This standard check stays on your device.</p>
+          <button id="scan-button" class="button primary" type="button" disabled>Check this file <span aria-hidden="true">→</span></button>
+        </section>
 
-        <article class="panel clean-panel">
-          <div class="panel-top"><div><p class="eyebrow">04 + 05 / clean copy</p><h2>Sanitize &amp; verify</h2></div><span id="clean-status" class="local-label muted">waiting</span></div>
-          <p>Supported raster images are redrawn through canvas, removing their embedded file metadata. Visible pixels are preserved; detected text or codes are not automatically hidden.</p>
-          <div class="actions"><button id="sanitize-button" class="button primary" type="button" disabled>Create clean copy</button><button id="download-button" class="button quiet" type="button" disabled>Download copy</button></div>
-          <p id="sanitize-note" class="microcopy">Audio, video, PDFs, RAW, and other containers are report-only in this static app.</p>
-        </article>
+        <section id="results-step" class="results-step" hidden aria-live="polite">
+          <div class="results-heading">
+            <div><p class="step-number">Your check</p><h2>What we found</h2></div>
+            <p id="score-summary" class="score-summary"></p>
+          </div>
+          <div id="findings" class="findings"></div>
+          <div id="signals" class="signal-grid" aria-label="Check summary"></div>
+        </section>
 
-        <article class="panel cloud-panel">
-          <div class="panel-top"><div><p class="eyebrow">Optional / cloud</p><h2>Enhanced analysis</h2></div><span class="cloud-label">sends a copy</span></div>
-          <p>Use a provider endpoint you control for visual context, speech-to-text PII, or sampled video analysis. No request is made until you confirm consent.</p>
-          <label class="field-label" for="cloud-endpoint">Provider endpoint</label><input id="cloud-endpoint" type="url" placeholder="https://your-worker.example/api/analyze" autocomplete="off">
-          <label class="consent"><input id="cloud-consent" type="checkbox"><span>I understand this sends my selected file to the endpoint above for analysis.</span></label>
-          <button id="cloud-button" class="button cloud" type="button" disabled>Send with consent</button>
-          <p id="cloud-status" class="microcopy">Cloud analysis is off.</p>
-        </article>
+        <section id="save-step" class="app-card save-step" hidden aria-labelledby="save-title">
+          <p class="step-number">Step 3</p>
+          <h2 id="save-title">Save your clean copy</h2>
+          <p id="save-copy">For supported images, we can make a fresh copy without embedded file details. It cannot remove visible text, faces, or codes.</p>
+          <div class="actions"><button id="sanitize-button" class="button primary" type="button" disabled>Make a clean copy</button><button id="download-button" class="button quiet" type="button" disabled>Save clean copy</button></div>
+          <p id="sanitize-note" class="microcopy"></p>
+          <p id="clean-status" class="visually-hidden" aria-live="polite"></p>
+        </section>
+
+        <details class="more-options">
+          <summary>More checks <span>Optional</span></summary>
+          <div class="options-body">
+            <section>
+              <h2>Look for writing in an image</h2>
+              <p>This optional check uses an extra on-device tool and may take a moment to start.</p>
+              <button id="deep-scan-button" class="button quiet" type="button" disabled>Look for writing</button>
+            </section>
+            <section>
+              <h2>Use a private analysis service you trust</h2>
+              <p>If you choose this, a copy of your selected file is sent to the address you enter. Nothing is sent until you agree below.</p>
+              <label class="field-label" for="cloud-endpoint">Service address</label><input id="cloud-endpoint" type="url" placeholder="https://your-service.example/check" autocomplete="off">
+              <label class="consent"><input id="cloud-consent" type="checkbox"><span>I understand that this sends my selected file to this service for an extra check.</span></label>
+              <button id="cloud-button" class="button quiet" type="button" disabled>Send for an extra check</button>
+              <p id="cloud-status" class="microcopy">No file has been sent.</p>
+            </section>
+            <section class="summary-option">
+              <h2>Keep a check summary</h2>
+              <p>Save a small record of what this check found.</p>
+              <button id="report-button" class="text-button" type="button" disabled>Save check summary</button>
+            </section>
+          </div>
+        </details>
       </section>
     </main>
     <template id="finding-template"><article class="finding"><span class="severity"></span><div><strong></strong><p></p><small></small></div></article></template>
