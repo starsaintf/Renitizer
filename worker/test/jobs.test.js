@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import {
   JOB_STATES,
+  JOB_KINDS,
   MEDIA_KINDS,
   createJob,
   getConfiguration,
@@ -14,7 +15,26 @@ import {
 
 test('job contract exposes the supported states and media kinds', () => {
   assert.deepEqual(JOB_STATES, ['queued', 'processing', 'complete', 'failed']);
+  assert.deepEqual(JOB_KINDS, ['media-analysis', 'document-cleaning']);
   assert.deepEqual(MEDIA_KINDS, ['image', 'video', 'audio', 'document']);
+});
+
+test('validates metadata-only document-cleaning job requests', () => {
+  assert.deepEqual(validateJobRequest({
+    kind: 'document-cleaning',
+    mediaKind: 'document',
+    documentType: 'pdf',
+    fileName: 'contract.pdf',
+    requestedActions: ['remove-author', 'remove-comment'],
+  }), { valid: true, value: {
+    kind: 'document-cleaning',
+    mediaKind: 'document',
+    documentType: 'pdf',
+    fileName: 'contract.pdf',
+    mimeType: null,
+    sizeBytes: null,
+    requestedActions: ['remove-author', 'remove-comment'],
+  } });
 });
 
 test('state helpers allow only forward processing lifecycle transitions', () => {
@@ -108,6 +128,26 @@ test('GET /api/jobs/:id returns the created job status', async () => {
 
   assert.equal(response.status, 200);
   assert.equal((await response.json()).job.id, job.id);
+});
+
+test('document-cleaning processor route reports unconfigured instead of fabricating a clean document', async () => {
+  const response = await worker.fetch(new Request('https://worker.example/api/document-cleaning', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'document-cleaning', mediaKind: 'document', documentType: 'office', fileName: 'board-notes.docx', requestedActions: ['remove-comment'],
+    }),
+  }), {});
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    processor: {
+      state: 'unconfigured',
+      available: false,
+      output: null,
+      message: 'No document-cleaning processor is configured.',
+    },
+  });
 });
 
 test('job routes reject invalid JSON and unknown job IDs', async () => {

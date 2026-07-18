@@ -32,6 +32,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/jobs' && request.method === 'POST') return createLocalJob(request, env);
     if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getLocalJob(url, env);
+    if (url.pathname === '/api/document-cleaning' && request.method === 'POST') return documentCleaningProcessor(request, env);
     if (request.method !== 'POST' || url.pathname !== '/api/analyze') return json({ error: 'POST /api/analyze only' }, 404);
     if (!env.OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY server secret is not configured.' }, 500);
     const form = await request.formData();
@@ -53,6 +54,21 @@ async function createLocalJob(request, env) {
   const job = createJob(validation.value);
   localJobs.set(job.id, job);
   return json(serializeJobStatus(job, getConfiguration(env)), 202);
+}
+
+async function documentCleaningProcessor(request, env) {
+  let input;
+  try { input = await request.json(); }
+  catch { return json({ error: 'Request body must be valid JSON.' }, 400); }
+  const validation = validateJobRequest(input);
+  if (!validation.valid) return json({ error: validation.error }, 400);
+  if (validation.value.kind !== 'document-cleaning') return json({ error: 'This route only accepts document-cleaning jobs.' }, 400);
+
+  const configuration = getConfiguration(env);
+  if (!configuration.available) {
+    return json({ processor: { state: 'unconfigured', available: false, output: null, message: 'No document-cleaning processor is configured.' } }, 503);
+  }
+  return json({ processor: { state: 'queued', available: true, output: null, message: 'The configured processor has not returned a clean document yet.' } }, 202);
 }
 
 function getLocalJob(url, env) {

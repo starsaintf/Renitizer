@@ -18,6 +18,7 @@ Serve the repository root with any static server, then open `index.html`. For ex
 - Audio: accepted for a report-only local workflow and, only after explicit consent, sent to the Worker transcription path. The Worker detects transcript email, phone, street-address, and name cues.
 - Video: the browser locally samples up to three image frames and sends those frames to the existing cloud vision path only after explicit consent. If the browser cannot decode or encode frames, it reports that a dedicated cloud video endpoint is required.
 - Canvas clean copies: supported raster images only. They remove embedded metadata by re-encoding pixels but do not redact visible content.
+- PDF and Office documents: the browser can prepare a metadata-only document-cleaning request and safe status report. It does not inspect document internals, upload the document, or claim a clean document exists unless a separately configured processor returns one.
 - Secure sharing: after a clean copy is ready, the optional **Share safely** section creates a browser-local AES-256-GCM encrypted package and a separate recovery-key file. The package envelope never contains the key, original filename, or raw findings unless the user explicitly includes detailed findings. The expiry is package metadata, not remotely enforceable deletion.
 
 ### Encrypted-package delivery boundary
@@ -38,7 +39,7 @@ Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or 
 
 ### Processing-job API prerequisites
 
-`POST /api/jobs` and `GET /api/jobs/:id` provide a metadata-only, in-memory job contract for image, video, audio, and document workflows. They do not upload content or claim that a job was processed. For real asynchronous processing, create a private R2 bucket and a Cloudflare Queue, then uncomment and replace the documented `MEDIA_BUCKET` and `JOBS_QUEUE` bindings in `worker/wrangler.toml`; until both are bound, each status response explicitly reports `processing.state: "unconfigured"`.
+`POST /api/jobs` and `GET /api/jobs/:id` provide a metadata-only, in-memory job contract for image, video, audio, and document workflows. Document-cleaning jobs use `kind: "document-cleaning"`, `documentType` (`pdf` or `office`), and a list of requested removal actions; raw content is rejected. `POST /api/document-cleaning` is the optional processor contract. Until a real processor is configured it returns `503` with `processor.state: "unconfigured"` and `output: null`, never a fabricated clean document. For real asynchronous processing, create a private R2 bucket and a Cloudflare Queue, then uncomment and replace the documented `MEDIA_BUCKET` and `JOBS_QUEUE` bindings in `worker/wrangler.toml`; until both are bound, each status response explicitly reports `processing.state: "unconfigured"`.
 
 ## Native wrappers
 

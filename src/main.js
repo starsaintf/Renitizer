@@ -11,17 +11,19 @@ import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
 import { encryptCleanCopy } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
+import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
+import { documentUiCopy } from './documents/presentation.js';
 
 const $ = (selector) => document.querySelector(selector);
 const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set(), share: null };
+const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
 ui['file-input'].addEventListener('change', () => selectFile(ui['file-input'].files[0]));
 ui['scan-button'].addEventListener('click', localScan);
 ui['deep-scan-button'].addEventListener('click', deepScan);
-ui['sanitize-button'].addEventListener('click', cleanImage);
+ui['sanitize-button'].addEventListener('click', cleanSelectedFile);
 ui['download-button'].addEventListener('click', downloadCleanCopy);
 ui['report-button'].addEventListener('click', downloadReport);
 ui['cloud-button'].addEventListener('click', cloudScan);
@@ -52,11 +54,22 @@ function selectFile(file) {
   state.verification = null;
   state.share = null;
   state.availableChecks = new Set();
+  state.documentPlan = null;
+  state.documentRequest = null;
+  state.documentReport = null;
   ui['file-summary'].textContent = file ? `${file.name} · ${formatBytes(file.size)}` : 'No file selected yet.';
   const isImage = Boolean(file?.type.startsWith('image/'));
+  const documentType = documentTypeForFile(file);
+  const isDocument = Boolean(documentType);
+  if (isDocument) {
+    state.documentPlan = createDocumentSanitizationPlan(documentType);
+    state.documentRequest = createDocumentCleaningJobRequest(file, state.documentPlan);
+    state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'unconfigured', available: false } });
+  }
   ui['scan-button'].disabled = !file;
   ui['deep-scan-button'].disabled = !file;
-  ui['sanitize-button'].disabled = !isImage;
+  ui['sanitize-button'].disabled = !isImage && !isDocument;
+  ui['sanitize-button'].textContent = isDocument ? documentUiCopy(documentType).actionLabel : 'Make a clean copy';
   ui['download-button'].disabled = true;
   ui['report-button'].disabled = true;
   updateCloudButton();
@@ -65,7 +78,9 @@ function selectFile(file) {
   ui['share-section'].hidden = true;
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
-  ui['save-copy'].textContent = isImage
+  ui['save-copy'].textContent = isDocument
+    ? documentUiCopy(documentType).saveCopy
+    : isImage
     ? 'For supported images, make a metadata-free copy and choose which marked areas to blur or cover.'
     : 'This kind of file can be checked, but we cannot make a clean copy for it in this browser. You can still save a check summary in More checks.';
   render();
@@ -75,8 +90,13 @@ async function localScan() {
   if (!state.file) return;
   busy(ui['scan-button'], 'Checking…');
   try {
-    state.findings = await runScanners(state.file, [scanFileFacts, scanMetadata, scanBarcodes]);
-    state.availableChecks = new Set(['metadata', 'barcodes']);
+    if (documentTypeForFile(state.file)) {
+      state.findings = [{ id: 'document-processor-unavailable', category: 'capability', title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured document-cleaning processor.', severity: 'low', confidence: 1, assessment: 'unavailable', resolved: false }];
+      state.availableChecks = new Set();
+    } else {
+      state.findings = await runScanners(state.file, [scanFileFacts, scanMetadata, scanBarcodes]);
+      state.availableChecks = new Set(['metadata', 'barcodes']);
+    }
     invalidateCleanVerification();
     updateReport();
   } finally { idle(ui['scan-button'], 'Check this file'); }
@@ -91,6 +111,11 @@ async function deepScan() {
     invalidateCleanVerification();
     updateReport();
   } finally { idle(ui['deep-scan-button'], 'Look for writing'); }
+}
+
+async function cleanSelectedFile() {
+  if (documentTypeForFile(state.file)) return prepareDocumentCleaningRequest();
+  return cleanImage();
 }
 
 async function cleanImage() {
@@ -113,6 +138,22 @@ async function cleanImage() {
   } finally { idle(ui['sanitize-button'], 'Make a clean copy'); }
 }
 
+function prepareDocumentCleaningRequest() {
+  if (!state.file || !state.documentPlan) return;
+  const copy = documentUiCopy(state.documentPlan.documentType);
+  busy(ui['sanitize-button'], 'Preparing request…');
+  try {
+    state.documentRequest = createDocumentCleaningJobRequest(state.file, state.documentPlan);
+    state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'unconfigured', available: false } });
+    state.cleanFile = null;
+    state.verification = null;
+    ui['download-button'].disabled = true;
+    ui['clean-status'].textContent = state.documentReport.message;
+    ui['sanitize-note'].textContent = `Cleaning request prepared for a ${copy.fileLabel.toLowerCase()}. ${state.documentReport.message}`;
+    updateReport();
+  } finally { idle(ui['sanitize-button'], copy.actionLabel); }
+}
+
 async function cloudScan() {
   if (!state.file || !ui['cloud-consent'].checked) return;
   busy(ui['cloud-button'], 'Sending…');
@@ -129,7 +170,7 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification }; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); renderShareSection(); }
+function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); renderShareSection(); }
 
 function render() {
   ui.findings.replaceChildren();
@@ -246,6 +287,7 @@ function friendlyFinding(finding) {
   if (finding.id.includes('ocr-email')) return { title: 'An email address was found', detail: 'Writing in this image may include an email address.' };
   if (finding.id.includes('ocr-phone')) return { title: 'A phone number was found', detail: 'Writing in this image may include a phone number.' };
   if (finding.id.includes('ocr-visual-address')) return { title: 'An address may be visible', detail: 'Writing in this image may include part of an address.' };
+  if (finding.id === 'document-processor-unavailable') return { title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured processor.' };
   if (finding.id.includes('unavailable')) return { title: 'One extra check was not available', detail: 'Your browser could not run every optional check.' };
   if (finding.id === 'file-facts') return { title: 'Your file was checked', detail: 'We looked at the file and the details that can travel with it.' };
   return { title: 'A private detail may need your attention', detail: 'This extra check found something worth reviewing before you share.' };
