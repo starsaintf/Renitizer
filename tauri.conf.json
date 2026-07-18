@@ -1,0 +1,1 @@
+{"productName":"Renitizer","version":"0.1.0","identifier":"com.renitizer.app","build":{"frontendDist":"..","devUrl":"http://localhost:4173"},"app":{"windows":[{"title":"Renitizer","width":1180,"height":820,"minWidth":390,"minHeight":680}]},"bundle":{"active":true,"targets":"all"}}
