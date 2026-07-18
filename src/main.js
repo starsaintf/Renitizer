@@ -7,11 +7,12 @@ import { runScanners } from './scanners/orchestrator.js';
 import { sanitizeRasterImage } from './sanitize/image.js';
 import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
 import { makeReport } from './core/report.js';
+import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null };
+const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'verification-details', 'verification-checks'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set() };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -24,7 +25,7 @@ ui['report-button'].addEventListener('click', downloadReport);
 ui['cloud-button'].addEventListener('click', cloudScan);
 ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
-ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); updateReport(); });
+ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); invalidateCleanVerification(); updateReport(); });
 window.addEventListener('hashchange', renderView);
 
 function renderView() {
@@ -41,6 +42,8 @@ function selectFile(file) {
   state.cleanFile = null;
   state.findings = [];
   state.report = null;
+  state.verification = null;
+  state.availableChecks = new Set();
   ui['file-summary'].textContent = file ? `${file.name} · ${formatBytes(file.size)}` : 'No file selected yet.';
   const isImage = Boolean(file?.type.startsWith('image/'));
   ui['scan-button'].disabled = !file;
@@ -64,6 +67,8 @@ async function localScan() {
   busy(ui['scan-button'], 'Checking…');
   try {
     state.findings = await runScanners(state.file, [scanFileFacts, scanMetadata, scanBarcodes]);
+    state.availableChecks = new Set(['metadata', 'barcodes']);
+    invalidateCleanVerification();
     updateReport();
   } finally { idle(ui['scan-button'], 'Check this file'); }
 }
@@ -73,6 +78,8 @@ async function deepScan() {
   busy(ui['deep-scan-button'], 'Checking…');
   try {
     state.findings = [...state.findings, ...(await runScanners(state.file, [scanOcr]))];
+    state.availableChecks.add('visibleText');
+    invalidateCleanVerification();
     updateReport();
   } finally { idle(ui['deep-scan-button'], 'Look for writing'); }
 }
@@ -81,13 +88,15 @@ async function cleanImage() {
   if (!state.file) return;
   busy(ui['sanitize-button'], 'Making your copy…');
   try {
-    state.cleanFile = await sanitizeRasterImage(state.file, resolveRedactionPlan(state.findings));
+    const beforeFindings = state.findings;
+    const redactionPlan = resolveRedactionPlan(beforeFindings);
+    state.cleanFile = await sanitizeRasterImage(state.file, redactionPlan);
     state.findings = state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding);
-    ui['clean-status'].textContent = 'Your clean copy is ready.';
-    ui['sanitize-note'].textContent = 'Your clean copy is ready. We checked it again for embedded file details.';
+    const postClean = await rerunCleanScanners(state.cleanFile, state.availableChecks);
+    state.verification = createVerification({ beforeFindings, afterFindings: postClean.findings, assessedChecks: postClean.assessedChecks, redactionPlan });
+    ui['clean-status'].textContent = state.verification.readiness.label;
+    ui['sanitize-note'].textContent = state.verification.readiness.label;
     ui['download-button'].disabled = false;
-    const verification = await runScanners(state.cleanFile, [scanMetadata]);
-    state.findings = [...state.findings, ...verification.map((finding) => ({ ...finding, id: `verify-${finding.id}`, detail: `In the clean copy: ${finding.detail}` }))];
     updateReport();
   } catch (error) {
     ui['sanitize-note'].textContent = 'We could not make a clean copy of this file in this browser. You can still save your check summary.';
@@ -102,6 +111,7 @@ async function cloudScan() {
     const cloudFiles = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : [state.file];
     const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], consent: ui['cloud-consent'].checked });
     state.findings = [...state.findings, ...cloudFindings];
+    invalidateCleanVerification();
     ui['cloud-status'].textContent = `Your extra check returned ${cloudFindings.length} item${cloudFindings.length === 1 ? '' : 's'}.`;
     updateReport();
   } catch (error) { ui['cloud-status'].textContent = 'That extra check could not finish. Check the service address and try again.'; }
@@ -109,7 +119,7 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = makeReport(state.findings); ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); }
+function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification }; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); }
 
 function render() {
   ui.findings.replaceChildren();
@@ -132,7 +142,7 @@ function render() {
       for (const action of ['blur', 'cover', 'keep']) {
         const button = document.createElement('button');
         button.className = 'text-button'; button.type = 'button'; button.textContent = action;
-        button.addEventListener('click', () => { state.findings = setFindingAction(state.findings, finding.id, action); updateReport(); });
+        button.addEventListener('click', () => { state.findings = setFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });
         controls.append(button);
       }
       element.querySelector('div').append(controls);
@@ -140,7 +150,33 @@ function render() {
     ui.findings.append(element);
   }
   const counts = state.report?.counts;
-  ui['score-summary'].textContent = counts ? `${counts.unresolved} item${counts.unresolved === 1 ? '' : 's'} may need your attention.` : '';
+  ui['score-summary'].textContent = state.verification
+    ? `${state.verification.readiness.label} · Safety score ${state.verification.safetyScore}/100.`
+    : counts ? `${counts.unresolved} item${counts.unresolved === 1 ? '' : 's'} may need your attention.` : '';
+  renderVerification();
+}
+
+function renderVerification() {
+  ui['verification-details'].hidden = !state.verification;
+  ui['verification-checks'].replaceChildren();
+  if (!state.verification) return;
+  for (const [check, result] of Object.entries(state.verification.checks)) {
+    const item = document.createElement('p');
+    item.textContent = `${friendlyCheckName(check)}: ${result.status.replace('-', ' ')} — ${result.reason}`;
+    ui['verification-checks'].append(item);
+  }
+}
+
+function friendlyCheckName(check) {
+  return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment', faceLandmarks: 'Face and landmarks', reverseImage: 'Reverse-image / OSINT' })[check] || check;
+}
+
+function invalidateCleanVerification() {
+  state.cleanFile = null;
+  state.verification = null;
+  ui['download-button'].disabled = true;
+  ui['clean-status'].textContent = '';
+  ui['sanitize-note'].textContent = '';
 }
 
 function renderRedactionPreview() {
@@ -158,6 +194,7 @@ function renderRedactionPreview() {
 function addRedactionBox() {
   const id = `manual-redaction-${Date.now()}`;
   state.findings = [...state.findings, { id, category: 'identity', title: 'Manual redaction area', detail: 'An area you marked for review.', severity: 'medium', confidence: 1, assessment: 'assessed', resolved: true, redactionAction: 'blur', boundingBox: { x: 0.35, y: 0.35, width: 0.3, height: 0.18 } }];
+  invalidateCleanVerification();
   updateReport();
 }
 
@@ -168,7 +205,7 @@ function renderRedactionBox(finding) {
   const label = document.createElement('label');
   const select = document.createElement('select');
   for (const action of ['blur', 'cover', 'keep']) { const option = new Option(action, action, false, finding.redactionAction === action); select.add(option); }
-  select.addEventListener('change', () => { state.findings = setFindingAction(state.findings, finding.id, select.value); updateReport(); });
+  select.addEventListener('change', () => { state.findings = setFindingAction(state.findings, finding.id, select.value); invalidateCleanVerification(); updateReport(); });
   label.append(select); box.append(label);
   const handle = document.createElement('span'); handle.className = 'redaction-handle'; box.append(handle);
   box.addEventListener('pointerdown', (event) => editRedactionBox(event, finding.id, handle.contains(event.target)));
@@ -187,7 +224,7 @@ function editRedactionBox(event, id, resizing) {
     state.findings = state.findings.map((finding) => finding.id === id ? { ...finding, boundingBox: box } : finding); positionBox(target, box);
   };
   target.addEventListener('pointermove', move);
-  target.addEventListener('pointerup', () => { target.removeEventListener('pointermove', move); updateReport(); }, { once: true });
+  target.addEventListener('pointerup', () => { target.removeEventListener('pointermove', move); invalidateCleanVerification(); updateReport(); }, { once: true });
 }
 
 function friendlyFinding(finding) {
@@ -208,6 +245,21 @@ function download(blob, name) { const url = URL.createObjectURL(blob); const lin
 function busy(button, label) { button.disabled = true; button.textContent = label; }
 function idle(button, label) { button.disabled = false; button.textContent = label; }
 function formatBytes(bytes) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
+
+async function rerunCleanScanners(file, availableChecks) {
+  const scanners = { metadata: scanMetadata, barcodes: scanBarcodes, visibleText: scanOcr };
+  const assessedChecks = [...availableChecks].filter((check) => check in scanners);
+  const findings = (await Promise.all(assessedChecks.map(async (check) => {
+    const results = await runScanners(file, [scanners[check]]);
+    return results.map((finding) => ({
+      ...finding,
+      id: `verify-${check}-${finding.id}`,
+      verificationCheck: check,
+      detail: `In the clean copy: ${finding.detail}`,
+    }));
+  }))).flat();
+  return { findings, assessedChecks };
+}
 
 async function extractVideoFrames(file) {
   const url = URL.createObjectURL(file);
