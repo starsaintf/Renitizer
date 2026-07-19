@@ -15,3 +15,10 @@ export async function getRemoteJob({ session, jobId, fetcher = fetch }) {
   if (!response.ok) throw new Error('Private job is unavailable.');
   return response.json();
 }
+
+export async function downloadRemoteJob({ session, jobId, fetcher = fetch }) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(jobId)) throw new Error('Private job is invalid.');
+  const response = await fetcher(`${session.endpoint}/api/jobs/${jobId}/output`, { headers: { Authorization: `Renvoy ${session.capability}` } });
+  if (!response.ok) throw new Error('Private clean copy is unavailable.');
+  return response.blob();
+}
