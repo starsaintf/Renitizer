@@ -41,4 +41,4 @@
 
 - [x] **Step 1: Document** `RENVOY_IDENTITY_VERIFICATION_URL` as a Worker secret and the endpoint request/response contract.
 - [x] **Step 2: Run** the complete test suite in deterministic groups and `npm run check`.
-- [ ] **Step 3: Review** `git diff --check`, commit the scoped changes, and retain the commit hash for handoff.
+- [x] **Step 3: Review** `git diff --check`, commit the scoped changes, and retain the commit hash for handoff (`b4900cd`).
