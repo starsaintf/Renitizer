@@ -12,7 +12,7 @@
   <body>
     <main class="shell">
       <header class="masthead">
-        <a class="brand" href="#home" aria-label="Renitizer home"><span class="brand-mark" aria-hidden="true">R</span><span>Renitizer</span></a>
+        <a class="brand" href="#app" aria-label="Renitizer"><span class="brand-mark" aria-hidden="true">R</span><span>Renitizer</span></a>
         <p class="device-note"><span aria-hidden="true"></span>Your file stays on your device</p>
       </header>
 
@@ -58,7 +58,6 @@
           <p class="eyebrow">Your simple three-step check</p>
           <h1 id="app-title">Clean before you share.</h1>
           <p>Work through one small step at a time.</p>
-          <a class="open-package-link" href="#decrypt">Open an encrypted package instead</a>
         </div>
 
         <ol class="progress" aria-label="Cleaning progress">
@@ -121,13 +120,17 @@
             <div class="actions"><button id="share-package-button" class="button primary" type="button" disabled>Create &amp; download encrypted package</button><button id="share-key-button" class="button quiet" type="button" disabled>Save recovery key</button><button id="share-report-button" class="text-button" type="button" disabled>Download privacy report</button></div>
             <p id="share-delivery" class="microcopy"></p>
             <p id="share-status" class="microcopy" aria-live="polite"></p>
-            <p class="microcopy"><a href="#decrypt">Open an encrypted package you received</a></p>
           </section>
         </section>
 
         <details class="more-options">
           <summary>More checks <span>Optional</span></summary>
           <div class="options-body">
+            <section>
+              <h2>Open a package someone sent you</h2>
+              <p>Only use this when you received both a private package and its separate recovery key.</p>
+              <a class="text-button" href="#decrypt">Open a received package</a>
+            </section>
             <section>
               <h2>Look for writing in an image</h2>
               <p>This optional check uses an extra on-device tool and may take a moment to start.</p>
