@@ -15,6 +15,8 @@ import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/c
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
+import { requestRenvoySession } from './remote/renvoy-bridge.js';
+import { submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
 const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
@@ -200,20 +202,34 @@ async function cleanImage() {
   } finally { idle(ui['sanitize-button'], 'Make a clean copy'); }
 }
 
-function prepareDocumentCleaningRequest() {
+async function prepareDocumentCleaningRequest() {
   if (!state.file || !state.documentPlan) return;
   const copy = documentUiCopy(state.documentPlan.documentType);
-  busy(ui['sanitize-button'], 'Preparing request…');
+  busy(ui['sanitize-button'], 'Starting private clean…');
   try {
     state.documentRequest = createDocumentCleaningJobRequest(state.file, state.documentPlan);
-    state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'unconfigured', available: false } });
+    const session = await requestRenvoySession();
+    if (!session.available) {
+      state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'unconfigured', available: false } });
+      ui['clean-status'].textContent = 'Open Renitizer from Renvoy to make a private document clean copy.';
+      ui['sanitize-note'].textContent = 'This browser can prepare the check. Renvoy safely connects it to your private cleaner.';
+      state.receiptReady = true;
+      updateReport();
+      return;
+    }
+    const queued = await submitRemoteJob({ session, file: state.file, metadata: state.documentRequest });
+    state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'configured', available: true } });
     state.cleanFile = null;
     state.verification = null;
     ui['download-button'].disabled = true;
-    ui['clean-status'].textContent = state.documentReport.message;
-    ui['sanitize-note'].textContent = `Cleaning request prepared for a ${copy.fileLabel.toLowerCase()}. ${state.documentReport.message}`;
+    ui['clean-status'].textContent = 'Your private clean copy is being prepared.';
+    ui['sanitize-note'].textContent = `Renvoy has started cleaning this ${copy.fileLabel.toLowerCase()}. You can come back to save it when it is ready.`;
+    state.documentRequest = { ...state.documentRequest, remoteJobId: queued.job?.id ?? null };
     state.receiptReady = true;
     updateReport();
+  } catch {
+    ui['clean-status'].textContent = 'We could not start the private document clean. Your original was not changed.';
+    ui['sanitize-note'].textContent = 'Try again from Renvoy when your private connection is available.';
   } finally { idle(ui['sanitize-button'], copy.actionLabel); }
 }
 
