@@ -454,7 +454,7 @@ async function analyzeImage(file, env) {
     method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'gpt-4.1-mini',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'Analyze this user-provided image only for shareable privacy risks: visible addresses, email addresses, phone numbers, QR/barcodes, identity documents, and sensitive personal data. Do not identify people or infer location.' }, { type: 'input_image', image_url: `data:${file.type};base64,${base64}` }] }],
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'Analyze this user-provided image only for shareable privacy risks: visible addresses, email addresses, phone numbers, QR/barcodes, identity documents, screens, vehicle plates, and location clues such as readable signs, maps, recognizable landmarks, route displays, or dashboard GPS. Report the visible clue and its privacy risk; do not identify people or state a precise location as fact.' }, { type: 'input_image', image_url: `data:${file.type};base64,${base64}` }] }],
       text: { format: { type: 'json_schema', name: 'privacy_findings', strict: true, schema: findingSchema } },
     }),
   });

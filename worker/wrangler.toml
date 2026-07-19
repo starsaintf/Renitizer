@@ -22,21 +22,25 @@ compatibility_date = "2026-07-18"
 # Create the resources first, then replace only the placeholder names below.
 # Do not put credentials, account IDs, or deploy-specific IDs in this file.
 #
-# [[r2_buckets]]
-# binding = "MEDIA_BUCKET"
-# bucket_name = "your-private-media-bucket"
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "renitizer-private-media"
 #
 # Hosted encrypted sharing uses this same private bucket. Do not expose it
 # publicly: the Worker enforces Renvoy sender/recipient access and stores only
 # encrypted share packages.
 #
-# [[queues.producers]]
-# binding = "JOBS_QUEUE"
-# queue = "your-processing-jobs-queue"
-#
-# [[queues.consumers]]
-# queue = "your-processing-jobs-queue"
-# max_batch_size = 1
-# max_batch_timeout = 5
-# max_retries = 3
-# dead_letter_queue = "your-processing-jobs-dead-letter-queue"
+[[queues.producers]]
+binding = "JOBS_QUEUE"
+queue = "renitizer-processing-jobs"
+
+[[queues.consumers]]
+queue = "renitizer-processing-jobs"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "renitizer-processing-jobs-dlq"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
