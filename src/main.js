@@ -16,11 +16,11 @@ import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
 import { requestRenvoySession } from './remote/renvoy-bridge.js';
-import { submitRemoteJob } from './remote/jobs.js';
+import { getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
 const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, audio: { duration: null, manualRanges: [], processing: null } };
+const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, audio: { duration: null, manualRanges: [], processing: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -66,6 +66,7 @@ async function selectFile(file) {
   state.documentPlan = null;
   state.documentRequest = null;
   state.documentReport = null;
+  state.remoteDocument = null;
   state.audio = { duration: null, manualRanges: [], processing: null };
   ui['file-summary'].textContent = file ? `${file.name} · ${formatBytes(file.size)}` : 'No file selected yet.';
   const isImage = Boolean(file?.type.startsWith('image/'));
@@ -225,12 +226,27 @@ async function prepareDocumentCleaningRequest() {
     ui['clean-status'].textContent = 'Your private clean copy is being prepared.';
     ui['sanitize-note'].textContent = `Renvoy has started cleaning this ${copy.fileLabel.toLowerCase()}. You can come back to save it when it is ready.`;
     state.documentRequest = { ...state.documentRequest, remoteJobId: queued.job?.id ?? null };
+    state.remoteDocument = { session, jobId: queued.job?.id ?? null };
+    if (state.remoteDocument.jobId) setTimeout(() => { void refreshRemoteDocument(); }, 1500);
     state.receiptReady = true;
     updateReport();
   } catch {
     ui['clean-status'].textContent = 'We could not start the private document clean. Your original was not changed.';
     ui['sanitize-note'].textContent = 'Try again from Renvoy when your private connection is available.';
   } finally { idle(ui['sanitize-button'], copy.actionLabel); }
+}
+
+async function refreshRemoteDocument() {
+  if (!state.remoteDocument?.jobId) return;
+  try {
+    const status = await getRemoteJob(state.remoteDocument);
+    if (status.job?.state === 'complete') {
+      ui['clean-status'].textContent = 'Your private clean copy is ready to save.';
+      ui['sanitize-note'].textContent = 'Your clean document is ready in Renvoy.';
+    } else if (status.job?.state === 'failed') {
+      ui['clean-status'].textContent = 'The private document clean could not finish. Your original was not changed.';
+    } else setTimeout(() => { void refreshRemoteDocument(); }, 2500);
+  } catch { ui['clean-status'].textContent = 'We could not check the private clean yet. It may still be working.'; }
 }
 
 async function cloudScan() {
