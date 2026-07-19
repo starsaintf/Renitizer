@@ -1,10 +1,11 @@
 import { transcriptFindings } from './pii.js';
 import { createJob, getConfiguration, serializeJobStatus, validateJobRequest } from './jobs.js';
+import { introspectRenvoyIdentity } from './identity.js';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
 };
 
 const localJobs = new Map();
@@ -26,13 +27,18 @@ const findingSchema = {
   },
 };
 
-export default {
-  async fetch(request, env) {
+export function createWorker({ identityFetcher = fetch } = {}) {
+  return {
+    async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
     const url = new URL(request.url);
-    if (url.pathname === '/api/jobs' && request.method === 'POST') return createLocalJob(request, env);
-    if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getLocalJob(url, env);
-    if (url.pathname === '/api/document-cleaning' && request.method === 'POST') return documentCleaningProcessor(request, env);
+    if (isRemoteRoute(url.pathname)) {
+      const identity = await requireRenvoyIdentity(request, env, identityFetcher);
+      if (identity instanceof Response) return identity;
+      if (url.pathname === '/api/jobs' && request.method === 'POST') return createLocalJob(request, env, identity);
+      if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getLocalJob(url, env, identity);
+      if (url.pathname === '/api/document-cleaning' && request.method === 'POST') return documentCleaningProcessor(request, env, identity);
+    }
     if (request.method !== 'POST' || url.pathname !== '/api/analyze') return json({ error: 'POST /api/analyze only' }, 404);
     if (!env.OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY server secret is not configured.' }, 500);
     const form = await request.formData();
@@ -40,10 +46,13 @@ export default {
     if (!files.length) return json({ error: 'At least one media file is required.' }, 400);
     const findings = (await Promise.all(files.map((file) => analyzeMedia(file, env)))).flat();
     return json({ findings });
-  },
-};
+    },
+  };
+}
 
-async function createLocalJob(request, env) {
+export default createWorker();
+
+async function createLocalJob(request, env, identity) {
   let input;
   try { input = await request.json(); }
   catch { return json({ error: 'Request body must be valid JSON.' }, 400); }
@@ -51,7 +60,7 @@ async function createLocalJob(request, env) {
   const validation = validateJobRequest(input);
   if (!validation.valid) return json({ error: validation.error }, 400);
 
-  const job = createJob(validation.value);
+  const job = { ...createJob(validation.value), ownerAccountId: identity.accountId };
   localJobs.set(job.id, job);
   return json(serializeJobStatus(job, getConfiguration(env)), 202);
 }
@@ -71,12 +80,29 @@ async function documentCleaningProcessor(request, env) {
   return json({ processor: { state: 'queued', available: true, output: null, message: 'The configured processor has not returned a clean document yet.' } }, 202);
 }
 
-function getLocalJob(url, env) {
+function getLocalJob(url, env, identity) {
   const id = url.pathname.slice('/api/jobs/'.length);
   if (!id || id.includes('/')) return json({ error: 'Job not found.' }, 404);
   const job = localJobs.get(id);
   if (!job) return json({ error: 'Job not found.' }, 404);
+  if (job.ownerAccountId !== identity.accountId) return json({ error: 'Job not found.' }, 404);
   return json(serializeJobStatus(job, getConfiguration(env)));
+}
+
+function isRemoteRoute(pathname) {
+  return pathname === '/api/jobs'
+    || pathname.startsWith('/api/jobs/')
+    || pathname === '/api/document-cleaning'
+    || pathname === '/api/share'
+    || pathname.startsWith('/api/share/');
+}
+
+async function requireRenvoyIdentity(request, env, fetcher) {
+  const result = await introspectRenvoyIdentity(request.headers, env, fetcher);
+  if (result.state === 'authenticated') return result.principal;
+  if (result.state === 'unconfigured') return json({ error: { code: 'identity-unconfigured', message: 'Renvoy identity verification is not configured.' } }, 503);
+  if (result.state === 'unavailable') return json({ error: { code: 'identity-unavailable', message: 'Renvoy identity verification is temporarily unavailable.' } }, 503);
+  return json({ error: { code: 'unauthorized', message: 'A valid Renvoy identity is required.' } }, 401);
 }
 
 async function analyzeMedia(file, env) {

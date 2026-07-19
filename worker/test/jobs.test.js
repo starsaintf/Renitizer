@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../src/index.js';
+import worker, { createWorker } from '../src/index.js';
 import {
   JOB_STATES,
   JOB_KINDS,
@@ -12,6 +12,21 @@ import {
   transitionJob,
   validateJobRequest,
 } from '../src/jobs.js';
+
+const identityUrl = 'https://identity.renvoy.example/v1/identity/renitizer/verify';
+
+function identityEnvironment() {
+  return { RENVOY_IDENTITY_VERIFICATION_URL: identityUrl };
+}
+
+function renvoyHeaders() {
+  return { Authorization: 'Renvoy opaque-token_123', 'Content-Type': 'application/json' };
+}
+
+async function withRenvoyVerification(identity, action) {
+  const testWorker = createWorker({ identityFetcher: async () => Response.json(identity) });
+  return action(testWorker);
+}
 
 test('job contract exposes the supported states and media kinds', () => {
   assert.deepEqual(JOB_STATES, ['queued', 'processing', 'complete', 'failed']);
@@ -97,12 +112,28 @@ test('status response explicitly reports unconfigured processing infrastructure'
   });
 });
 
-test('POST /api/jobs creates a mock queued job without claiming it processed', async () => {
+test('remote job routes fail closed until Renvoy identity verification is configured', async () => {
   const response = await worker.fetch(new Request('https://worker.example/api/jobs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mediaKind: 'document', fileName: 'contract.pdf' }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mediaKind: 'document' }),
   }), {});
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'identity-unconfigured');
+});
+
+test('remote job routes require a Renvoy credential once verification is configured', async () => {
+  const response = await worker.fetch(new Request('https://worker.example/api/jobs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mediaKind: 'document' }),
+  }), identityEnvironment());
+
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error.code, 'unauthorized');
+});
+
+test('POST /api/jobs creates an account-bound job only with Renvoy Renitizer access', async () => {
+  const response = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs', {
+    method: 'POST', headers: renvoyHeaders(), body: JSON.stringify({ mediaKind: 'document', fileName: 'contract.pdf' }),
+  }), identityEnvironment()));
 
   assert.equal(response.status, 202);
   const body = await response.json();
@@ -114,30 +145,40 @@ test('POST /api/jobs creates a mock queued job without claiming it processed', a
     missingBindings: ['MEDIA_BUCKET', 'JOBS_QUEUE'],
   });
   assert.equal('content' in body.job, false);
+
+  const insufficient = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: [] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs', {
+    method: 'POST', headers: renvoyHeaders(), body: JSON.stringify({ mediaKind: 'image' }),
+  }), identityEnvironment()));
+  assert.equal(insufficient.status, 401);
+  assert.equal((await insufficient.json()).error.code, 'unauthorized');
 });
 
-test('GET /api/jobs/:id returns the created job status', async () => {
-  const create = await worker.fetch(new Request('https://worker.example/api/jobs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mediaKind: 'image', fileName: 'portrait.jpg' }),
-  }), {});
+test('GET /api/jobs/:id requires Renvoy Renitizer access and does not expose another account job', async () => {
+  const create = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs', {
+    method: 'POST', headers: renvoyHeaders(), body: JSON.stringify({ mediaKind: 'image', fileName: 'portrait.jpg' }),
+  }), identityEnvironment()));
   const { job } = await create.json();
 
-  const response = await worker.fetch(new Request(`https://worker.example/api/jobs/${job.id}`), {});
+  const owner = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request(`https://worker.example/api/jobs/${job.id}`, {
+    headers: { Authorization: 'Renvoy opaque-token_123' },
+  }), identityEnvironment()));
+  assert.equal(owner.status, 200);
+  assert.equal((await owner.json()).job.id, job.id);
 
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).job.id, job.id);
+  const otherAccount = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_bob', deviceId: 'dev_laptop', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request(`https://worker.example/api/jobs/${job.id}`, {
+    headers: { Authorization: 'Renvoy opaque-token_123' },
+  }), identityEnvironment()));
+  assert.equal(otherAccount.status, 404);
 });
 
 test('document-cleaning processor route reports unconfigured instead of fabricating a clean document', async () => {
-  const response = await worker.fetch(new Request('https://worker.example/api/document-cleaning', {
+  const response = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/document-cleaning', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: renvoyHeaders(),
     body: JSON.stringify({
       kind: 'document-cleaning', mediaKind: 'document', documentType: 'office', fileName: 'board-notes.docx', requestedActions: ['remove-comment'],
     }),
-  }), {});
+  }), identityEnvironment()));
 
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), {
@@ -151,15 +192,17 @@ test('document-cleaning processor route reports unconfigured instead of fabricat
 });
 
 test('job routes reject invalid JSON and unknown job IDs', async () => {
-  const invalid = await worker.fetch(new Request('https://worker.example/api/jobs', {
+  const invalid = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: renvoyHeaders(),
     body: '{',
-  }), {});
+  }), identityEnvironment()));
   assert.equal(invalid.status, 400);
   assert.equal((await invalid.json()).error, 'Request body must be valid JSON.');
 
-  const missing = await worker.fetch(new Request('https://worker.example/api/jobs/unknown'), {});
+  const missing = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs/unknown', {
+    headers: { Authorization: 'Renvoy opaque-token_123' },
+  }), identityEnvironment()));
   assert.equal(missing.status, 404);
   assert.equal((await missing.json()).error, 'Job not found.');
 });

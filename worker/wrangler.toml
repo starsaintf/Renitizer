@@ -2,6 +2,11 @@ name = "renitizer-analysis"
 main = "src/index.js"
 compatibility_date = "2026-07-18"
 
+# Shared Renvoy identity for remote jobs and hosted sharing. Configure the
+# deployed Renvoy endpoint as a Worker secret, not as a browser value:
+#   wrangler secret put RENVOY_IDENTITY_VERIFICATION_URL
+# The endpoint is POST /v1/identity/renitizer/verify on the Renvoy runtime.
+
 # Processing-job deployment prerequisites. Keep these disabled for the local
 # metadata-only mock API: it will return processing.state = "unconfigured"
 # until both bindings are supplied in a real deployment.
