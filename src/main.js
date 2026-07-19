@@ -34,7 +34,7 @@ ui['cloud-button'].addEventListener('click', cloudScan);
 ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
 ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); invalidateCleanVerification(); updateReport(); });
-ui['add-audio-range-button'].addEventListener('click', addManualAudioRange);
+ui['add-audio-range-button']?.addEventListener('click', addManualAudioRange);
 ui['share-expiry'].addEventListener('change', () => { state.share = null; renderShareSection(); });
 ui['share-detailed-findings'].addEventListener('change', () => { state.share = null; renderShareSection(); });
 ui['share-package-button'].addEventListener('click', createEncryptedPackage);
