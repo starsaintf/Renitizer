@@ -22,6 +22,7 @@
           <h1 id="home-title">Share the picture.<br><em>Keep the extras out.</em></h1>
           <p class="lede">Renitizer helps you check a file for common private details, then make a cleaner image copy when it can.</p>
           <a class="button primary start-button" href="#app">Start cleaning <span aria-hidden="true">→</span></a>
+          <a class="open-package-link" href="#decrypt">Open an encrypted package</a>
           <p class="reassurance">The standard check happens on your device. Renitizer cannot promise anonymity or remove things already visible in a picture.</p>
         </div>
 
@@ -32,12 +33,32 @@
         </ol>
       </section>
 
+      <section id="decrypt-view" class="app-view decrypt-view" hidden aria-labelledby="decrypt-title">
+        <a class="back-link" href="#home">← Home</a>
+        <div class="app-intro">
+          <p class="eyebrow">Open a shared file</p>
+          <h1 id="decrypt-title">Open your<br><em>clean copy.</em></h1>
+          <p>Choose the encrypted package and its separate recovery key. Both stay in this browser.</p>
+        </div>
+        <section class="app-card" aria-labelledby="package-title">
+          <h2 id="package-title">Open an encrypted package</h2>
+          <p>Nothing is uploaded. Renitizer uses the two files only on this device, then lets you save the clean file.</p>
+          <label class="field-label" for="encrypted-package-input">Encrypted package</label>
+          <input id="encrypted-package-input" class="file-picker" type="file" accept="application/json,.json">
+          <label class="field-label" for="recovery-key-input">Recovery key</label>
+          <input id="recovery-key-input" class="file-picker" type="file" accept="application/json,.json">
+          <div class="actions"><button id="decrypt-package-button" class="button primary" type="button">Open &amp; save clean file</button></div>
+          <p id="decrypt-status" class="microcopy" aria-live="polite">Choose both files to begin.</p>
+        </section>
+      </section>
+
       <section id="app-view" class="app-view" hidden aria-labelledby="app-title">
         <a class="back-link" href="#home">← Home</a>
         <div class="app-intro">
           <p class="eyebrow">Your simple three-step check</p>
           <h1 id="app-title">Clean before you share.</h1>
           <p>Work through one small step at a time.</p>
+          <a class="open-package-link" href="#decrypt">Open an encrypted package instead</a>
         </div>
 
         <ol class="progress" aria-label="Cleaning progress">
@@ -80,6 +101,12 @@
           <div class="actions"><button id="sanitize-button" class="button primary" type="button" disabled>Make a clean copy</button><button id="download-button" class="button quiet" type="button" disabled>Save clean copy</button></div>
           <p id="sanitize-note" class="microcopy"></p>
           <p id="clean-status" class="visually-hidden" aria-live="polite"></p>
+          <section id="receipt-section" class="receipt-section" hidden aria-labelledby="receipt-title">
+            <div><p class="step-number">Your receipt</p><h3 id="receipt-title">What happened to your file</h3></div>
+            <p id="receipt-summary" class="microcopy"></p>
+            <div id="receipt-lists" class="receipt-lists"></div>
+            <button id="receipt-report-button" class="text-button" type="button">Download receipt (JSON)</button>
+          </section>
           <details id="verification-details" class="verification-details" hidden>
             <summary>Verification details</summary>
             <div id="verification-checks"></div>
@@ -94,6 +121,7 @@
             <div class="actions"><button id="share-package-button" class="button primary" type="button" disabled>Create &amp; download encrypted package</button><button id="share-key-button" class="button quiet" type="button" disabled>Save recovery key</button><button id="share-report-button" class="text-button" type="button" disabled>Download privacy report</button></div>
             <p id="share-delivery" class="microcopy"></p>
             <p id="share-status" class="microcopy" aria-live="polite"></p>
+            <p class="microcopy"><a href="#decrypt">Open an encrypted package you received</a></p>
           </section>
         </section>
 

@@ -18,6 +18,7 @@ export async function encryptCleanCopy(cleanCopy, { expiresAt, report = null, cr
       createdAt: new Date().toISOString(),
       expiresAt: expiresAt || null,
       mimeType: cleanCopy.type || 'application/octet-stream',
+      fileName: cleanCopy.name || 'renitizer-clean-copy',
       iv: bytesToBase64(iv),
       ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
       report,
@@ -29,6 +30,21 @@ export async function decryptCleanCopy(envelope, key, cryptoImpl = globalThis.cr
   const crypto = requireWebCrypto(cryptoImpl);
   if (!envelope || envelope.format !== PACKAGE_FORMAT || envelope.algorithm !== 'AES-GCM') throw new Error('This is not a supported encrypted package.');
   return crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(envelope.iv) }, key, base64ToBytes(envelope.ciphertext));
+}
+
+export async function importRecoveryKey(recoveryFile, cryptoImpl = globalThis.crypto) {
+  const crypto = requireWebCrypto(cryptoImpl);
+  if (!recoveryFile || recoveryFile.format !== 'renitizer-recovery-key-v1' || recoveryFile.algorithm !== 'AES-256-GCM') {
+    throw new Error('This is not a supported recovery key file.');
+  }
+  let keyBytes;
+  try {
+    keyBytes = base64ToBytes(recoveryFile.recoveryKey);
+  } catch {
+    throw new Error('This recovery key file is malformed.');
+  }
+  if (keyBytes.byteLength !== 32) throw new Error('This recovery key file is malformed.');
+  return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
 }
 
 function requireWebCrypto(cryptoImpl) {

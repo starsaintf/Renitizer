@@ -8,16 +8,17 @@ import { sanitizeRasterImage } from './sanitize/image.js';
 import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
 import { getAudioProcessingState, inspectAudioFile, resolveAudioRedactionPlan, sanitizeAudioFile } from './sanitize/audio.js';
 import { makeReport } from './core/report.js';
+import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
-import { encryptCleanCopy } from './share/crypto.js';
+import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, audio: { duration: null, manualRanges: [], processing: null } };
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, audio: { duration: null, manualRanges: [], processing: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -37,14 +38,16 @@ ui['share-detailed-findings'].addEventListener('change', () => { state.share = n
 ui['share-package-button'].addEventListener('click', createEncryptedPackage);
 ui['share-key-button'].addEventListener('click', downloadRecoveryKey);
 ui['share-report-button'].addEventListener('click', downloadShareReport);
+ui['receipt-report-button'].addEventListener('click', downloadReceipt);
+ui['decrypt-package-button'].addEventListener('click', decryptSharedPackage);
 window.addEventListener('hashchange', renderView);
 
 function renderView() {
-  const showingApp = getViewFromHash(location.hash) === 'app';
-  ui['home-view'].hidden = showingApp;
-  ui['app-view'].hidden = !showingApp;
-  if (showingApp) document.title = 'Renitizer · clean your file';
-  else document.title = 'Renitizer · clean before you share';
+  const view = getViewFromHash(location.hash);
+  ui['home-view'].hidden = view !== 'home';
+  ui['app-view'].hidden = view !== 'app';
+  ui['decrypt-view'].hidden = view !== 'decrypt';
+  document.title = view === 'app' ? 'Renitizer · clean your file' : view === 'decrypt' ? 'Renitizer · open a shared file' : 'Renitizer · clean before you share';
 }
 
 async function selectFile(file) {
@@ -53,6 +56,8 @@ async function selectFile(file) {
   state.cleanFile = null;
   state.findings = [];
   state.report = null;
+  state.receipt = null;
+  state.receiptReady = false;
   state.verification = null;
   state.share = null;
   state.availableChecks = new Set();
@@ -80,6 +85,7 @@ async function selectFile(file) {
   ui['results-step'].hidden = true;
   ui['save-step'].hidden = true;
   ui['share-section'].hidden = true;
+  ui['receipt-section'].hidden = true;
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
   ui['save-copy'].textContent = isDocument
@@ -125,6 +131,7 @@ async function localScan() {
       state.availableChecks = new Set(['metadata', 'barcodes']);
     }
     invalidateCleanVerification();
+    state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
     updateReport();
   } finally { idle(ui['scan-button'], 'Check this file'); }
 }
@@ -163,6 +170,7 @@ async function cleanAudio() {
     ui['clean-status'].textContent = `Clean WAV copy created with ${plan.length} selected range${plan.length === 1 ? '' : 's'}.`;
     ui['sanitize-note'].textContent = 'Your WAV clean copy is ready to save. Review it before sharing.';
     ui['download-button'].disabled = false;
+    state.receiptReady = true;
     updateReport();
   } catch (error) {
     state.cleanFile = null;
@@ -185,6 +193,7 @@ async function cleanImage() {
     ui['clean-status'].textContent = state.verification.readiness.label;
     ui['sanitize-note'].textContent = state.verification.readiness.label;
     ui['download-button'].disabled = false;
+    state.receiptReady = true;
     updateReport();
   } catch (error) {
     ui['sanitize-note'].textContent = 'We could not make a clean copy of this file in this browser. You can still save your check summary.';
@@ -203,6 +212,7 @@ function prepareDocumentCleaningRequest() {
     ui['download-button'].disabled = true;
     ui['clean-status'].textContent = state.documentReport.message;
     ui['sanitize-note'].textContent = `Cleaning request prepared for a ${copy.fileLabel.toLowerCase()}. ${state.documentReport.message}`;
+    state.receiptReady = true;
     updateReport();
   } finally { idle(ui['sanitize-button'], copy.actionLabel); }
 }
@@ -216,6 +226,7 @@ async function cloudScan() {
     const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], consent: ui['cloud-consent'].checked });
     state.findings = [...state.findings, ...cloudFindings];
     invalidateCleanVerification();
+    state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
     ui['cloud-status'].textContent = `Your extra check returned ${cloudFindings.length} item${cloudFindings.length === 1 ? '' : 's'}.`;
     updateReport();
   } catch (error) { ui['cloud-status'].textContent = 'That extra check could not finish. Check the service address and try again.'; }
@@ -223,7 +234,7 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderRedactionPreview(); renderShareSection(); }
+function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderShareSection(); }
 
 function render() {
   ui.findings.replaceChildren();
@@ -271,6 +282,23 @@ function renderVerification() {
   }
 }
 
+function renderReceipt() {
+  ui['receipt-section'].hidden = !state.receipt;
+  if (!state.receipt) return;
+  ui['receipt-summary'].textContent = state.receipt.summary;
+  ui['receipt-lists'].replaceChildren();
+  for (const [title, items] of [['Found', state.receipt.found], ['Changed', state.receipt.changed], ['Kept', state.receipt.kept], ['Not checked', state.receipt.notChecked]]) {
+    const section = document.createElement('section');
+    const heading = document.createElement('h4');
+    heading.textContent = title;
+    const list = document.createElement('ul');
+    if (items.length) for (const item of items) { const entry = document.createElement('li'); entry.textContent = item; list.append(entry); }
+    else { const entry = document.createElement('li'); entry.textContent = 'None'; list.append(entry); }
+    section.append(heading, list);
+    ui['receipt-lists'].append(section);
+  }
+}
+
 function friendlyCheckName(check) {
   return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment', faceLandmarks: 'Face and landmarks', reverseImage: 'Reverse-image / OSINT' })[check] || check;
 }
@@ -279,6 +307,8 @@ function invalidateCleanVerification() {
   state.cleanFile = null;
   state.verification = null;
   state.share = null;
+  state.receipt = null;
+  state.receiptReady = false;
   ui['download-button'].disabled = true;
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
@@ -348,6 +378,7 @@ function friendlyFinding(finding) {
 
 function downloadCleanCopy() { download(state.cleanFile, state.cleanFile.name, state.cleanFile.type); }
 function downloadReport() { downloadPrivacyReport({ includeDetailedFindings: false }); }
+function downloadReceipt() { if (state.receipt) download(new Blob([JSON.stringify(state.receipt, null, 2)], { type: 'application/json' }), 'renitizer-cleaning-receipt.json', 'application/json'); }
 function renderShareSection() {
   const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
   ui['share-section'].hidden = !state.cleanFile;
@@ -396,6 +427,24 @@ function downloadPrivacyReport({ expiresAt = null, includeDetailedFindings = fal
   download(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), 'renitizer-privacy-report.json', 'application/json');
 }
 function download(blob, name) { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); }
+async function decryptSharedPackage() {
+  const packageFile = ui['encrypted-package-input'].files[0];
+  const keyFile = ui['recovery-key-input'].files[0];
+  if (!packageFile || !keyFile) { ui['decrypt-status'].textContent = 'Choose both the encrypted package and its recovery key.'; return; }
+  busy(ui['decrypt-package-button'], 'Opening…');
+  try {
+    const [envelope, recoveryFile] = await Promise.all([readJsonFile(packageFile), readJsonFile(keyFile)]);
+    const key = await importRecoveryKey(recoveryFile);
+    const clearBytes = await decryptCleanCopy(envelope, key);
+    const name = safeDownloadName(envelope.fileName);
+    download(new Blob([clearBytes], { type: envelope.mimeType || 'application/octet-stream' }), name, envelope.mimeType || 'application/octet-stream');
+    ui['decrypt-status'].textContent = 'Your clean file is ready to save. Neither file was sent anywhere.';
+  } catch (error) {
+    ui['decrypt-status'].textContent = 'We could not open this package. Check that the package and recovery key belong together, then try again.';
+  } finally { idle(ui['decrypt-package-button'], 'Open & save clean file'); }
+}
+async function readJsonFile(file) { return JSON.parse(await file.text()); }
+function safeDownloadName(value) { const name = String(value || 'renitizer-clean-copy').replace(/[\\/:*?"<>|]/g, '-').trim(); return name || 'renitizer-clean-copy'; }
 function busy(button, label) { button.disabled = true; button.textContent = label; }
 function idle(button, label) { button.disabled = false; button.textContent = label; }
 function formatBytes(bytes) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }

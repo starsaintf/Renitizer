@@ -1,3 +1,5 @@
 export function getViewFromHash(hash) {
-  return hash === '#app' ? 'app' : 'home';
+  if (hash === '#app') return 'app';
+  if (hash === '#decrypt') return 'decrypt';
+  return 'home';
 }
