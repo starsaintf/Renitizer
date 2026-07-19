@@ -45,6 +45,10 @@ Jobs are account-bound and a job ID cannot be read by another Renvoy account. `P
 
 Document-cleaning jobs use `kind: "document-cleaning"`, `documentType` (`pdf` or `office`), and a list of requested removal actions; raw JSON content is rejected. `POST /api/document-cleaning` is the optional processor contract. For real asynchronous processing, create a private R2 bucket, a Queue, and a dead-letter queue, then uncomment and replace the `MEDIA_BUCKET`, `JOBS_QUEUE`, producer, and consumer bindings in `worker/wrangler.toml`. Until both primary bindings exist, upload requests return `503 processing-unconfigured`; no file is accepted or retained.
 
+### Video renderer
+
+`processor/video` is a deployable FFmpeg service for actual video cover redaction. A `video-redaction` job accepts normalized, time-bounded `cover` tracks; the Worker streams the private R2 input to the service, stores its MP4 response in R2, then enables the owner-only `GET /api/jobs/:id/output` download. Set `PROCESSOR_URL` only in the Worker environment and `PROCESSOR_AUTH_TOKEN` only as a Worker/container secret. The first renderer intentionally supports solid cover boxes—the safest redaction mode—rather than silently substituting a weaker effect for a requested blur.
+
 ## Native wrappers
 
 - Capacitor: install Capacitor in a wrapper project, point it at this checkout's static web directory (`webDir: "."`), then add Android/iOS platforms. `capacitor.config.json` provides the app identity.

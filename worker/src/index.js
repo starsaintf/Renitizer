@@ -4,6 +4,7 @@ import {
   createStoredJob,
   getConfiguration,
   jobRecordKey,
+  outputObjectKey,
   serializeJobStatus,
   transitionJob,
   validateJobRequest,
@@ -36,7 +37,7 @@ const findingSchema = {
   },
 };
 
-export function createWorker({ identityFetcher = fetch } = {}) {
+export function createWorker({ identityFetcher = fetch, processorFetcher = fetch } = {}) {
   return {
     async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -46,6 +47,8 @@ export function createWorker({ identityFetcher = fetch } = {}) {
       if (identity instanceof Response) return identity;
       if (url.pathname === '/api/jobs/upload' && request.method === 'POST') return uploadDurableJob(request, env, identity);
       if (url.pathname === '/api/jobs' && request.method === 'POST') return createLocalJob(request, env, identity);
+      const outputMatch = /^\/api\/jobs\/([A-Za-z0-9_-]{1,128})\/output$/.exec(url.pathname);
+      if (outputMatch && request.method === 'GET') return downloadJobOutput(outputMatch[1], env, identity);
       if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getJob(url, env, identity);
       if (url.pathname === '/api/document-cleaning' && request.method === 'POST') return documentCleaningProcessor(request, env, identity);
     }
@@ -58,7 +61,7 @@ export function createWorker({ identityFetcher = fetch } = {}) {
     return json({ findings });
     },
     async queue(batch, env) {
-      for (const message of batch.messages) await consumeQueuedJob(message, env);
+      for (const message of batch.messages) await consumeQueuedJob(message, env, processorFetcher);
     },
   };
 }
@@ -155,6 +158,29 @@ async function getJob(url, env, identity) {
   return json(serializeJobStatus(job, getConfiguration(env)));
 }
 
+async function downloadJobOutput(jobId, env, identity) {
+  if (!env.MEDIA_BUCKET) return json({ error: 'Job output not found.' }, 404);
+  try {
+    const job = await readStoredJob(env.MEDIA_BUCKET, identity.accountId, jobId);
+    if (!job?.output || job.state !== 'complete') return json({ error: 'Job output not found.' }, 404);
+    const expectedKey = outputObjectKey({ ownerAccountId: identity.accountId, jobId });
+    if (job.output.key !== expectedKey) return json({ error: 'Job output not found.' }, 404);
+    const output = await env.MEDIA_BUCKET.get(expectedKey);
+    if (!output?.body) return json({ error: 'Job output not found.' }, 404);
+    const contentType = output.httpMetadata?.contentType === 'video/mp4' ? 'video/mp4' : 'application/octet-stream';
+    return new Response(output.body, {
+      headers: {
+        ...cors,
+        'Content-Type': contentType,
+        'Content-Disposition': 'attachment; filename="renitized-video.mp4"',
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch {
+    return json({ error: { code: 'storage-unavailable', message: 'The private output store is unavailable.' } }, 503);
+  }
+}
+
 function isRemoteRoute(pathname) {
   return pathname === '/api/jobs'
     || pathname.startsWith('/api/jobs/')
@@ -167,7 +193,7 @@ async function safeDelete(bucket, key) {
   try { await bucket.delete(key); } catch { /* Preserve the primary request error without leaking object details. */ }
 }
 
-async function consumeQueuedJob(message, env) {
+async function consumeQueuedJob(message, env, processorFetcher) {
   const body = message?.body;
   if (!body || body.version !== 1 || typeof body.jobId !== 'string' || typeof body.ownerAccountId !== 'string') {
     message.ack();
@@ -181,20 +207,57 @@ async function consumeQueuedJob(message, env) {
     }
     const processing = transitionJob(job, 'processing');
     await writeStoredJob(env.MEDIA_BUCKET, processing);
-    const failed = {
-      ...transitionJob(processing, 'failed'),
-      output: null,
-      failure: {
-        code: 'processor-unavailable',
-        message: 'No media processor is configured for this job.',
-      },
-    };
+    if (processing.kind === 'video-redaction' && env.PROCESSOR_URL && env.PROCESSOR_AUTH_TOKEN) {
+      try {
+        const complete = await renderVideoJob(processing, env, processorFetcher);
+        await writeStoredJob(env.MEDIA_BUCKET, complete);
+        message.ack();
+        return;
+      } catch {
+        const failed = processorFailure(processing, 'processor-failed', 'The video processor could not produce a clean video.');
+        await writeStoredJob(env.MEDIA_BUCKET, failed);
+        message.ack();
+        return;
+      }
+    }
+    const failed = processorFailure(processing, 'processor-unavailable', 'No media processor is configured for this job.');
     await writeStoredJob(env.MEDIA_BUCKET, failed);
     message.ack();
   } catch {
     if (typeof message.retry === 'function') message.retry();
     else throw new Error('Queued job could not be processed.');
   }
+}
+
+async function renderVideoJob(job, env, processorFetcher) {
+  const input = await env.MEDIA_BUCKET.get(job.input.key);
+  if (!input?.body) throw new Error('Video input is unavailable.');
+  const response = await processorFetcher(env.PROCESSOR_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.PROCESSOR_AUTH_TOKEN}`,
+      'Content-Type': job.input.contentType,
+      'X-Renitizer-Video-Tracks': encodeTracks(job.redactions),
+    },
+    body: input.body,
+  });
+  const contentType = response.headers.get('Content-Type')?.split(';', 1)[0].toLowerCase();
+  if (!response.ok || !response.body || contentType !== 'video/mp4') throw new Error('Video renderer response is invalid.');
+  const key = outputObjectKey({ ownerAccountId: job.ownerAccountId, jobId: job.id });
+  await env.MEDIA_BUCKET.put(key, response.body, { httpMetadata: { contentType } });
+  return {
+    ...transitionJob(job, 'complete'),
+    output: { key, contentType },
+    failure: null,
+  };
+}
+
+function processorFailure(job, code, message) {
+  return {
+    ...transitionJob(job, 'failed'),
+    output: null,
+    failure: { code, message },
+  };
 }
 
 async function readStoredJob(bucket, ownerAccountId, jobId) {
@@ -209,6 +272,13 @@ function writeStoredJob(bucket, job) {
   return bucket.put(jobRecordKey({ ownerAccountId: job.ownerAccountId, jobId: job.id }), JSON.stringify(job), {
     httpMetadata: { contentType: 'application/json' },
   });
+}
+
+function encodeTracks(tracks) {
+  const bytes = new TextEncoder().encode(JSON.stringify(tracks));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 async function requireRenvoyIdentity(request, env, fetcher) {

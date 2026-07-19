@@ -10,6 +10,7 @@ import {
   getConfiguration,
   inputObjectKey,
   jobRecordKey,
+  outputObjectKey,
   isJobState,
   serializeJobStatus,
   transitionJob,
@@ -34,7 +35,7 @@ async function withRenvoyVerification(identity, action) {
 
 test('job contract exposes the supported states and media kinds', () => {
   assert.deepEqual(JOB_STATES, ['queued', 'processing', 'complete', 'failed']);
-  assert.deepEqual(JOB_KINDS, ['media-analysis', 'document-cleaning']);
+  assert.deepEqual(JOB_KINDS, ['media-analysis', 'document-cleaning', 'video-redaction']);
   assert.deepEqual(MEDIA_KINDS, ['image', 'video', 'audio', 'document']);
 });
 
@@ -80,6 +81,18 @@ test('validates metadata-only job creation requests', () => {
     mimeType: 'video/mp4',
     sizeBytes: 2048,
   } });
+});
+
+test('accepts only bounded cover tracks for a video redaction job', () => {
+  const result = validateJobRequest({
+    kind: 'video-redaction', mediaKind: 'video', fileName: 'street.mp4', mimeType: 'video/mp4', sizeBytes: 2048,
+    redactions: [{ id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+  });
+  assert.deepEqual(result, { valid: true, value: {
+    kind: 'video-redaction', mediaKind: 'video', fileName: 'street.mp4', mimeType: 'video/mp4', sizeBytes: 2048,
+    redactions: [{ id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+  } });
+  assert.equal(outputObjectKey({ ownerAccountId: 'acct_renvoy_alice', jobId: 'job-123' }), 'jobs/acct_renvoy_alice/job-123/output.mp4');
 });
 
 test('creates account-scoped R2 input keys without using an unsafe source filename', () => {
@@ -308,6 +321,81 @@ test('queue consumer records a processor-unavailable failure instead of a fictio
     code: 'processor-unavailable',
     message: 'No media processor is configured for this job.',
   });
+});
+
+test('queue consumer streams a video to the renderer and stores a completed private output', async () => {
+  const record = createStoredJob({
+    kind: 'video-redaction', mediaKind: 'video', fileName: 'walkthrough.mp4', mimeType: 'video/mp4', sizeBytes: 3,
+    redactions: [{ id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+  }, 'acct_renvoy_alice', () => 'job_render', () => '2026-07-19T00:00:00.000Z');
+  const recordKey = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  let current = record;
+  const writes = [];
+  const bucket = {
+    async get(key) {
+      if (key === recordKey) return { json: async () => current };
+      if (key === record.input.key) return { body: new Blob(['raw']).stream() };
+      return null;
+    },
+    async put(key, body, options) {
+      if (key === recordKey) current = JSON.parse(body);
+      writes.push({ key, body, options });
+    },
+  };
+  let request;
+  const testWorker = createWorker({ processorFetcher: async (url, options) => {
+    request = { url, options };
+    return new Response(new Blob(['clean']).stream(), { status: 200, headers: { 'Content-Type': 'video/mp4' } });
+  } });
+  let acknowledged = false;
+  await testWorker.queue({
+    messages: [{ body: { version: 1, jobId: record.id, ownerAccountId: record.ownerAccountId }, ack() { acknowledged = true; } }],
+  }, { MEDIA_BUCKET: bucket, PROCESSOR_URL: 'https://renderer.example/v1/render/video', PROCESSOR_AUTH_TOKEN: 'processor-secret' });
+
+  assert.equal(acknowledged, true);
+  assert.equal(current.state, 'complete');
+  assert.deepEqual(current.output, { key: outputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id }), contentType: 'video/mp4' });
+  assert.equal(current.failure, null);
+  assert.equal(request.url, 'https://renderer.example/v1/render/video');
+  assert.equal(request.options.headers.Authorization, 'Bearer processor-secret');
+  assert.deepEqual(JSON.parse(Buffer.from(request.options.headers['X-Renitizer-Video-Tracks'], 'base64url').toString('utf8')), record.redactions);
+  assert.equal(writes.some(({ key }) => key === current.output.key), true);
+});
+
+test('GET /api/jobs/:id/output streams only the owner’s completed private video', async () => {
+  const record = {
+    ...createStoredJob({
+      kind: 'video-redaction', mediaKind: 'video', fileName: 'walkthrough.mp4', mimeType: 'video/mp4', sizeBytes: 3,
+      redactions: [{ id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+    }, 'acct_renvoy_alice', () => 'job_download', () => '2026-07-19T00:00:00.000Z'),
+    state: 'complete',
+    output: { key: outputObjectKey({ ownerAccountId: 'acct_renvoy_alice', jobId: 'job_download' }), contentType: 'video/mp4' },
+  };
+  const recordKey = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  const bucket = {
+    async get(key) {
+      if (key === recordKey) return { json: async () => record };
+      if (key === record.output.key) return { body: new Blob(['clean']).stream(), httpMetadata: { contentType: 'video/mp4' } };
+      return null;
+    },
+  };
+  const owner = await withRenvoyVerification(
+    { principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } },
+    (testWorker) => testWorker.fetch(new Request(`https://worker.example/api/jobs/${record.id}/output`, {
+      headers: { Authorization: 'Renvoy opaque-token_123' },
+    }), { ...identityEnvironment(), MEDIA_BUCKET: bucket }),
+  );
+  assert.equal(owner.status, 200);
+  assert.equal(owner.headers.get('Content-Type'), 'video/mp4');
+  assert.equal(await owner.text(), 'clean');
+
+  const other = await withRenvoyVerification(
+    { principal: { accountId: 'acct_renvoy_bob', deviceId: 'dev_laptop', scopes: ['renitizer:use'] } },
+    (testWorker) => testWorker.fetch(new Request(`https://worker.example/api/jobs/${record.id}/output`, {
+      headers: { Authorization: 'Renvoy opaque-token_123' },
+    }), { ...identityEnvironment(), MEDIA_BUCKET: bucket }),
+  );
+  assert.equal(other.status, 404);
 });
 
 test('document-cleaning processor route reports unconfigured instead of fabricating a clean document', async () => {
