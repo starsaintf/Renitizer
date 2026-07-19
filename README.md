@@ -43,6 +43,12 @@ Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or 
 
 Jobs are account-bound and a job ID cannot be read by another Renvoy account. `POST /api/jobs/upload` accepts multipart `file` plus matching JSON `metadata` after Renvoy verification. When `MEDIA_BUCKET` and `JOBS_QUEUE` are configured, it stores the original in private R2, writes a durable job record, and sends only a compact job ID/account message to the queue. The object key is generated from the verified account and job ID; the source filename never becomes a path. `GET /api/jobs/:id` reads that durable record. The Queue handler records a clear processor-unavailable failure until a media renderer or document transformer is configured; it never fabricates a clean output.
 
+## Hosted encrypted sharing
+
+The browser encrypts a clean copy before it leaves the device. `POST /api/shares` accepts only that opaque encrypted package plus a named Renvoy recipient account and an expiry (up to 30 days). The private R2 bucket stores the encrypted bytes, an owner manifest, and a recipient index—never the recovery key, password, or clear file. The sender must transfer the recovery key separately using a channel they trust.
+
+Both the sender and the named recipient use their Renvoy identity to download `GET /api/shares/:shareId`; anyone else receives the same not-found response. `DELETE /api/shares/:shareId` lets only the sender revoke it, removing the encrypted package and access records. Expired packages are deleted on access and return a clear expired response. Downloaded packages are decrypted locally in the **Decrypt shared package** screen, so Renitizer hosting never performs decryption.
+
 Document-cleaning jobs use `kind: "document-cleaning"`, `documentType` (`pdf` or `office`), and a list of requested removal actions; raw JSON content is rejected. `POST /api/document-cleaning` is the optional processor contract. For real asynchronous processing, create a private R2 bucket, a Queue, and a dead-letter queue, then uncomment and replace the `MEDIA_BUCKET`, `JOBS_QUEUE`, producer, and consumer bindings in `worker/wrangler.toml`. Until both primary bindings exist, upload requests return `503 processing-unconfigured`; no file is accepted or retained.
 
 ### Video renderer

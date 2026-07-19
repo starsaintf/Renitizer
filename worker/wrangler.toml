@@ -24,6 +24,10 @@ compatibility_date = "2026-07-18"
 # binding = "MEDIA_BUCKET"
 # bucket_name = "your-private-media-bucket"
 #
+# Hosted encrypted sharing uses this same private bucket. Do not expose it
+# publicly: the Worker enforces Renvoy sender/recipient access and stores only
+# encrypted share packages.
+#
 # [[queues.producers]]
 # binding = "JOBS_QUEUE"
 # queue = "your-processing-jobs-queue"

@@ -11,10 +11,19 @@ import {
   validateUploadMetadata,
 } from './jobs.js';
 import { introspectRenvoyIdentity } from './identity.js';
+import {
+  isAccountId,
+  isExpired,
+  ownerManifestKey,
+  parseShareRequest,
+  publicShare,
+  recipientIndex,
+  recipientIndexKey,
+} from './shares.js';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'DELETE, GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
 };
 
@@ -47,6 +56,10 @@ export function createWorker({ identityFetcher = fetch, processorFetcher = fetch
       if (identity instanceof Response) return identity;
       if (url.pathname === '/api/jobs/upload' && request.method === 'POST') return uploadDurableJob(request, env, identity);
       if (url.pathname === '/api/jobs' && request.method === 'POST') return createLocalJob(request, env, identity);
+      if (url.pathname === '/api/shares' && request.method === 'POST') return createHostedShare(request, env, identity);
+      const shareMatch = /^\/api\/shares\/(share_[A-Za-z0-9_-]{8,128})$/.exec(url.pathname);
+      if (shareMatch && request.method === 'GET') return downloadHostedShare(shareMatch[1], env, identity);
+      if (shareMatch && request.method === 'DELETE') return revokeHostedShare(shareMatch[1], env, identity);
       const outputMatch = /^\/api\/jobs\/([A-Za-z0-9_-]{1,128})\/output$/.exec(url.pathname);
       if (outputMatch && request.method === 'GET') return downloadJobOutput(outputMatch[1], env, identity);
       if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getJob(url, env, identity);
@@ -186,7 +199,97 @@ function isRemoteRoute(pathname) {
     || pathname.startsWith('/api/jobs/')
     || pathname === '/api/document-cleaning'
     || pathname === '/api/share'
-    || pathname.startsWith('/api/share/');
+    || pathname.startsWith('/api/share/')
+    || pathname === '/api/shares'
+    || pathname.startsWith('/api/shares/');
+}
+
+async function createHostedShare(request, env, identity) {
+  if (!env.MEDIA_BUCKET) return json({ error: { code: 'share-unconfigured', message: 'Private encrypted sharing storage is not configured.' } }, 503);
+  let form;
+  try { form = await request.formData(); }
+  catch { return json({ error: 'Share uploads must use multipart form data.' }, 400); }
+  const parsed = parseShareRequest(form, identity.accountId);
+  if (!parsed.valid) return json({ error: parsed.error }, 400);
+  const { encryptedPackage, ...share } = parsed.value;
+  const manifestKey = ownerManifestKey({ ownerAccountId: share.ownerAccountId, shareId: share.id });
+  const indexKey = recipientIndexKey({ recipientAccountId: share.recipientAccountId, shareId: share.id });
+  try {
+    await env.MEDIA_BUCKET.put(share.packageKey, encryptedPackage, { httpMetadata: { contentType: 'application/octet-stream' } });
+    await env.MEDIA_BUCKET.put(manifestKey, JSON.stringify(share), { httpMetadata: { contentType: 'application/json' } });
+    await env.MEDIA_BUCKET.put(indexKey, JSON.stringify(recipientIndex(share)), { httpMetadata: { contentType: 'application/json' } });
+  } catch {
+    await Promise.all([safeDelete(env.MEDIA_BUCKET, share.packageKey), safeDelete(env.MEDIA_BUCKET, manifestKey), safeDelete(env.MEDIA_BUCKET, indexKey)]);
+    return json({ error: { code: 'storage-unavailable', message: 'The encrypted share could not be saved.' } }, 503);
+  }
+  return json({ share: publicShare(share) }, 201);
+}
+
+async function downloadHostedShare(shareId, env, identity) {
+  if (!env.MEDIA_BUCKET) return json({ error: 'Encrypted share not found.' }, 404);
+  try {
+    const share = await findShareForAccount(env.MEDIA_BUCKET, identity.accountId, shareId);
+    if (!share) return json({ error: 'Encrypted share not found.' }, 404);
+    if (isExpired(share)) {
+      await removeShare(env.MEDIA_BUCKET, share);
+      return json({ error: { code: 'share-expired', message: 'This encrypted share has expired.' } }, 410);
+    }
+    const encryptedPackage = await env.MEDIA_BUCKET.get(share.packageKey);
+    if (!encryptedPackage?.body) return json({ error: 'Encrypted share not found.' }, 404);
+    return new Response(encryptedPackage.body, {
+      headers: {
+        ...cors,
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="renitizer-encrypted-package.renitizer"',
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch {
+    return json({ error: { code: 'storage-unavailable', message: 'The encrypted share store is unavailable.' } }, 503);
+  }
+}
+
+async function revokeHostedShare(shareId, env, identity) {
+  if (!env.MEDIA_BUCKET) return json({ error: 'Encrypted share not found.' }, 404);
+  try {
+    const object = await env.MEDIA_BUCKET.get(ownerManifestKey({ ownerAccountId: identity.accountId, shareId }));
+    if (!object) return json({ error: 'Encrypted share not found.' }, 404);
+    const share = await object.json();
+    if (!isValidShare(share, shareId) || share.ownerAccountId !== identity.accountId) return json({ error: 'Encrypted share not found.' }, 404);
+    await removeShare(env.MEDIA_BUCKET, share);
+    return new Response(null, { status: 204, headers: cors });
+  } catch {
+    return json({ error: { code: 'storage-unavailable', message: 'The encrypted share store is unavailable.' } }, 503);
+  }
+}
+
+async function findShareForAccount(bucket, accountId, shareId) {
+  const owned = await bucket.get(ownerManifestKey({ ownerAccountId: accountId, shareId }));
+  if (owned) {
+    const share = await owned.json();
+    return isValidShare(share, shareId) && share.ownerAccountId === accountId ? share : null;
+  }
+  const index = await bucket.get(recipientIndexKey({ recipientAccountId: accountId, shareId }));
+  if (!index) return null;
+  const recipient = await index.json();
+  if (!isAccountId(recipient?.ownerAccountId)) return null;
+  const manifest = await bucket.get(ownerManifestKey({ ownerAccountId: recipient.ownerAccountId, shareId }));
+  if (!manifest) return null;
+  const share = await manifest.json();
+  return isValidShare(share, shareId) && share.recipientAccountId === accountId ? share : null;
+}
+
+function isValidShare(share, shareId) {
+  return share && share.id === shareId && isAccountId(share.ownerAccountId) && isAccountId(share.recipientAccountId)
+    && typeof share.packageKey === 'string' && typeof share.expiresAt === 'string' && Number.isFinite(Date.parse(share.expiresAt));
+}
+
+async function removeShare(bucket, share) {
+  await Promise.all([
+    safeDelete(bucket, share.packageKey),
+    safeDelete(bucket, ownerManifestKey({ ownerAccountId: share.ownerAccountId, shareId: share.id })),
+    safeDelete(bucket, recipientIndexKey({ recipientAccountId: share.recipientAccountId, shareId: share.id })),
+  ]);
 }
 
 async function safeDelete(bucket, key) {
