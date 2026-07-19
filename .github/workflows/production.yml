@@ -1,0 +1,103 @@
+name: Renitizer production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: renitizer-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify browser, Worker, and processor sources
+        run: |
+          node --check src/main.js
+          node --check worker/src/index.js
+          node --test test worker/test processor/video/test/filter.test.mjs processor/document/test_contract.mjs
+
+  processors:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: processor/video
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/renitizer-video:${{ github.sha }},ghcr.io/${{ github.repository_owner }}/renitizer-video:production
+      - uses: docker/build-push-action@v6
+        with:
+          context: processor/document
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/renitizer-document:${{ github.sha }},ghcr.io/${{ github.repository_owner }}/renitizer-document:production
+
+  deploy-worker:
+    needs: [verify, processors]
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+      - name: Install protected Worker secrets
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROCESSOR_AUTH_TOKEN: ${{ secrets.PROCESSOR_AUTH_TOKEN }}
+          VIDEO_PROCESSOR_URL: ${{ secrets.VIDEO_PROCESSOR_URL }}
+          DOCUMENT_PROCESSOR_URL: ${{ secrets.DOCUMENT_PROCESSOR_URL }}
+          RENVOY_IDENTITY_VERIFICATION_URL: ${{ secrets.RENVOY_IDENTITY_VERIFICATION_URL }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          for secret in PROCESSOR_AUTH_TOKEN VIDEO_PROCESSOR_URL DOCUMENT_PROCESSOR_URL RENVOY_IDENTITY_VERIFICATION_URL; do
+            test -n "${!secret}"
+            printf '%s' "${!secret}" | wrangler secret put "$secret"
+          done
+      - name: Deploy Worker
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy
+
+  pages:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
