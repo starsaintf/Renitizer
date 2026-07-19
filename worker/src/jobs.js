@@ -1,6 +1,7 @@
 export const JOB_STATES = ['queued', 'processing', 'complete', 'failed'];
 export const MEDIA_KINDS = ['image', 'video', 'audio', 'document'];
 export const JOB_KINDS = ['media-analysis', 'document-cleaning'];
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 const METADATA_FIELDS = new Set(['kind', 'mediaKind', 'documentType', 'fileName', 'mimeType', 'sizeBytes', 'requestedActions']);
 const RAW_CONTENT_FIELDS = new Set(['content', 'file', 'data', 'base64', 'bytes', 'raw', 'body']);
@@ -82,6 +83,49 @@ export function createJob(metadata, createId = defaultId, now = () => new Date()
   };
 }
 
+export function createStoredJob(metadata, ownerAccountId, createId = defaultId, now = () => new Date().toISOString()) {
+  const job = createJob(metadata, createId, now);
+  const owner = accountId(ownerAccountId);
+  return {
+    ...job,
+    ownerAccountId: owner,
+    input: {
+      key: inputObjectKey({ ownerAccountId: owner, jobId: job.id, fileName: job.fileName }),
+      contentType: job.mimeType,
+      sizeBytes: job.sizeBytes,
+    },
+    output: null,
+    failure: null,
+  };
+}
+
+export function inputObjectKey({ ownerAccountId, jobId, fileName }) {
+  const owner = accountId(ownerAccountId);
+  const id = jobIdValue(jobId);
+  return `jobs/${owner}/${id}/input.${safeExtension(fileName)}`;
+}
+
+export function jobRecordKey({ ownerAccountId, jobId }) {
+  return `jobs/${accountId(ownerAccountId)}/${jobIdValue(jobId)}/record.json`;
+}
+
+export function validateUploadMetadata(input, file) {
+  const metadata = validateJobRequest(input);
+  if (!metadata.valid) return metadata;
+  if (!file || typeof file !== 'object') return invalid('A media file is required.');
+  if (!isString(file.name) || !isString(file.type) || !Number.isSafeInteger(file.size) || file.size < 0) {
+    return invalid('The uploaded media file is invalid.');
+  }
+  if (file.size > MAX_UPLOAD_BYTES) return invalid(`The uploaded media file exceeds the ${MAX_UPLOAD_BYTES}-byte limit.`);
+  if (metadata.value.fileName !== file.name || metadata.value.mimeType !== file.type || metadata.value.sizeBytes !== file.size) {
+    return invalid('The declared file metadata does not match the uploaded media file.');
+  }
+  if (!mimeMatchesMediaKind(metadata.value.mediaKind, file.type)) {
+    return invalid('The uploaded media type does not match the selected media kind.');
+  }
+  return metadata;
+}
+
 export function getConfiguration(env) {
   const missingBindings = [];
   if (!env.MEDIA_BUCKET) missingBindings.push('MEDIA_BUCKET');
@@ -113,3 +157,21 @@ export function serializeJobStatus(job, configuration) {
 function invalid(error) { return { valid: false, error }; }
 function isString(value) { return typeof value === 'string'; }
 function defaultId() { return crypto.randomUUID(); }
+function accountId(value) {
+  if (!isString(value) || !/^[A-Za-z0-9._~:-]{1,512}$/.test(value)) throw new Error('Invalid job owner.');
+  return value;
+}
+function jobIdValue(value) {
+  if (!isString(value) || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new Error('Invalid job ID.');
+  return value;
+}
+function safeExtension(fileName) {
+  const match = /\.([A-Za-z0-9]{1,12})$/.exec(String(fileName ?? ''));
+  return match ? match[1].toLowerCase() : 'bin';
+}
+function mimeMatchesMediaKind(mediaKind, mimeType) {
+  if (mediaKind === 'image') return /^image\/[A-Za-z0-9.+-]+$/.test(mimeType);
+  if (mediaKind === 'video') return /^video\/[A-Za-z0-9.+-]+$/.test(mimeType);
+  if (mediaKind === 'audio') return /^audio\/[A-Za-z0-9.+-]+$/.test(mimeType);
+  return mimeType === 'application/pdf' || /^application\/(?:msword|vnd\.(?:openxmlformats-officedocument|ms-excel|ms-powerpoint)\.)/.test(mimeType);
+}

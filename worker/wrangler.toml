@@ -7,9 +7,9 @@ compatibility_date = "2026-07-18"
 #   wrangler secret put RENVOY_IDENTITY_VERIFICATION_URL
 # The endpoint is POST /v1/identity/renitizer/verify on the Renvoy runtime.
 
-# Processing-job deployment prerequisites. Keep these disabled for the local
-# metadata-only mock API: it will return processing.state = "unconfigured"
-# until both bindings are supplied in a real deployment.
+# Durable processing-job deployment prerequisites. Keep these disabled until
+# the real private R2 bucket and Queue have been provisioned. `POST
+# /api/jobs/upload` returns processing-unconfigured until both bindings exist.
 #
 # Create the resources first, then replace only the placeholder names below.
 # Do not put credentials, account IDs, or deploy-specific IDs in this file.
@@ -21,3 +21,10 @@ compatibility_date = "2026-07-18"
 # [[queues.producers]]
 # binding = "JOBS_QUEUE"
 # queue = "your-processing-jobs-queue"
+#
+# [[queues.consumers]]
+# queue = "your-processing-jobs-queue"
+# max_batch_size = 1
+# max_batch_timeout = 5
+# max_retries = 3
+# dead_letter_queue = "your-processing-jobs-dead-letter-queue"

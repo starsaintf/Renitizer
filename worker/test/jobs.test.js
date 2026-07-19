@@ -6,11 +6,15 @@ import {
   JOB_KINDS,
   MEDIA_KINDS,
   createJob,
+  createStoredJob,
   getConfiguration,
+  inputObjectKey,
+  jobRecordKey,
   isJobState,
   serializeJobStatus,
   transitionJob,
   validateJobRequest,
+  validateUploadMetadata,
 } from '../src/jobs.js';
 
 const identityUrl = 'https://identity.renvoy.example/v1/identity/renitizer/verify';
@@ -76,6 +80,39 @@ test('validates metadata-only job creation requests', () => {
     mimeType: 'video/mp4',
     sizeBytes: 2048,
   } });
+});
+
+test('creates account-scoped R2 input keys without using an unsafe source filename', () => {
+  const key = inputObjectKey({
+    ownerAccountId: 'acct_renvoy_alice',
+    jobId: 'job-123',
+    fileName: '../../tax return.PDF',
+  });
+  assert.equal(key, 'jobs/acct_renvoy_alice/job-123/input.pdf');
+
+  const job = createStoredJob({
+    mediaKind: 'document', fileName: '../../tax return.PDF', mimeType: 'application/pdf', sizeBytes: 99,
+  }, 'acct_renvoy_alice', () => 'job-123', () => '2026-07-19T00:00:00.000Z');
+  assert.equal(job.ownerAccountId, 'acct_renvoy_alice');
+  assert.equal(job.input.key, key);
+  assert.equal(job.output, null);
+  assert.equal(job.failure, null);
+  assert.equal(job.state, 'queued');
+});
+
+test('validates an upload against its declared media type and bounded file size', () => {
+  assert.deepEqual(validateUploadMetadata({
+    mediaKind: 'image', fileName: 'portrait.jpg', mimeType: 'image/jpeg', sizeBytes: 42,
+  }, { name: 'portrait.jpg', type: 'image/jpeg', size: 42 }), {
+    valid: true,
+    value: { mediaKind: 'image', fileName: 'portrait.jpg', mimeType: 'image/jpeg', sizeBytes: 42 },
+  });
+
+  const mismatch = validateUploadMetadata({
+    mediaKind: 'audio', fileName: 'portrait.jpg', mimeType: 'image/jpeg', sizeBytes: 42,
+  }, { name: 'portrait.jpg', type: 'image/jpeg', size: 42 });
+  assert.equal(mismatch.valid, false);
+  assert.match(mismatch.error, /does not match/i);
 });
 
 test('rejects raw file content and unsupported media kinds', () => {
@@ -153,6 +190,55 @@ test('POST /api/jobs creates an account-bound job only with Renvoy Renitizer acc
   assert.equal((await insufficient.json()).error.code, 'unauthorized');
 });
 
+test('POST /api/jobs/upload stores the authenticated media and enqueues a compact durable job', async () => {
+  const stored = [];
+  const messages = [];
+  const bucket = {
+    async put(key, value, options) { stored.push({ key, value, options }); return { key }; },
+    async delete(key) { stored.push({ deleted: key }); },
+  };
+  const queue = { async send(message) { messages.push(message); } };
+  const form = new FormData();
+  form.set('metadata', JSON.stringify({
+    mediaKind: 'image', fileName: 'portrait.jpg', mimeType: 'image/jpeg', sizeBytes: 3,
+  }));
+  form.set('file', new File(['abc'], 'portrait.jpg', { type: 'image/jpeg' }));
+
+  const response = await withRenvoyVerification(
+    { principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } },
+    (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs/upload', {
+      method: 'POST', headers: { Authorization: 'Renvoy opaque-token_123' }, body: form,
+    }), { ...identityEnvironment(), MEDIA_BUCKET: bucket, JOBS_QUEUE: queue }),
+  );
+
+  assert.equal(response.status, 202);
+  const payload = await response.json();
+  assert.equal(payload.job.state, 'queued');
+  assert.equal(stored.length, 2);
+  assert.match(stored[0].key, /^jobs\/acct_renvoy_alice\/[^/]+\/input\.jpg$/);
+  assert.match(stored[1].key, /^jobs\/acct_renvoy_alice\/[^/]+\/record\.json$/);
+  assert.deepEqual(messages, [{ version: 1, jobId: payload.job.id, ownerAccountId: 'acct_renvoy_alice' }]);
+  assert.equal(JSON.stringify(messages).includes('portrait.jpg'), false);
+});
+
+test('POST /api/jobs/upload reports unavailable infrastructure before accepting a file', async () => {
+  const form = new FormData();
+  form.set('metadata', JSON.stringify({
+    mediaKind: 'image', fileName: 'portrait.jpg', mimeType: 'image/jpeg', sizeBytes: 3,
+  }));
+  form.set('file', new File(['abc'], 'portrait.jpg', { type: 'image/jpeg' }));
+
+  const response = await withRenvoyVerification(
+    { principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } },
+    (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs/upload', {
+      method: 'POST', headers: { Authorization: 'Renvoy opaque-token_123' }, body: form,
+    }), identityEnvironment()),
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'processing-unconfigured');
+});
+
 test('GET /api/jobs/:id requires Renvoy Renitizer access and does not expose another account job', async () => {
   const create = await withRenvoyVerification({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }, (testWorker) => testWorker.fetch(new Request('https://worker.example/api/jobs', {
     method: 'POST', headers: renvoyHeaders(), body: JSON.stringify({ mediaKind: 'image', fileName: 'portrait.jpg' }),
@@ -169,6 +255,59 @@ test('GET /api/jobs/:id requires Renvoy Renitizer access and does not expose ano
     headers: { Authorization: 'Renvoy opaque-token_123' },
   }), identityEnvironment()));
   assert.equal(otherAccount.status, 404);
+});
+
+test('GET /api/jobs/:id reads a durable job record only from its owning account prefix', async () => {
+  const record = createStoredJob({
+    mediaKind: 'video', fileName: 'walkthrough.mp4', mimeType: 'video/mp4', sizeBytes: 22,
+  }, 'acct_renvoy_alice', () => 'job_durable', () => '2026-07-19T00:00:00.000Z');
+  const key = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  const bucket = {
+    async get(requestedKey) { return requestedKey === key ? { json: async () => record } : null; },
+  };
+
+  const owner = await withRenvoyVerification(
+    { principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } },
+    (testWorker) => testWorker.fetch(new Request(`https://worker.example/api/jobs/${record.id}`, {
+      headers: { Authorization: 'Renvoy opaque-token_123' },
+    }), { ...identityEnvironment(), MEDIA_BUCKET: bucket }),
+  );
+  assert.equal(owner.status, 200);
+  assert.equal((await owner.json()).job.id, record.id);
+
+  const other = await withRenvoyVerification(
+    { principal: { accountId: 'acct_renvoy_bob', deviceId: 'dev_laptop', scopes: ['renitizer:use'] } },
+    (testWorker) => testWorker.fetch(new Request(`https://worker.example/api/jobs/${record.id}`, {
+      headers: { Authorization: 'Renvoy opaque-token_123' },
+    }), { ...identityEnvironment(), MEDIA_BUCKET: bucket }),
+  );
+  assert.equal(other.status, 404);
+});
+
+test('queue consumer records a processor-unavailable failure instead of a fictional output', async () => {
+  const record = createStoredJob({
+    mediaKind: 'document', fileName: 'minutes.pdf', mimeType: 'application/pdf', sizeBytes: 9,
+  }, 'acct_renvoy_alice', () => 'job_queue', () => '2026-07-19T00:00:00.000Z');
+  const key = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  const saved = [];
+  const bucket = {
+    async get(requestedKey) { return requestedKey === key ? { json: async () => record } : null; },
+    async put(requestedKey, body) { saved.push({ key: requestedKey, job: JSON.parse(body) }); },
+  };
+  let acknowledged = false;
+  const testWorker = createWorker();
+  await testWorker.queue({
+    messages: [{ body: { version: 1, jobId: record.id, ownerAccountId: record.ownerAccountId }, ack() { acknowledged = true; } }],
+  }, { MEDIA_BUCKET: bucket });
+
+  assert.equal(acknowledged, true);
+  assert.equal(saved.length, 2);
+  assert.equal(saved.at(-1).job.state, 'failed');
+  assert.deepEqual(saved.at(-1).job.output, null);
+  assert.deepEqual(saved.at(-1).job.failure, {
+    code: 'processor-unavailable',
+    message: 'No media processor is configured for this job.',
+  });
 });
 
 test('document-cleaning processor route reports unconfigured instead of fabricating a clean document', async () => {

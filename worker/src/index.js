@@ -1,5 +1,14 @@
 import { transcriptFindings } from './pii.js';
-import { createJob, getConfiguration, serializeJobStatus, validateJobRequest } from './jobs.js';
+import {
+  createJob,
+  createStoredJob,
+  getConfiguration,
+  jobRecordKey,
+  serializeJobStatus,
+  transitionJob,
+  validateJobRequest,
+  validateUploadMetadata,
+} from './jobs.js';
 import { introspectRenvoyIdentity } from './identity.js';
 
 const cors = {
@@ -35,8 +44,9 @@ export function createWorker({ identityFetcher = fetch } = {}) {
     if (isRemoteRoute(url.pathname)) {
       const identity = await requireRenvoyIdentity(request, env, identityFetcher);
       if (identity instanceof Response) return identity;
+      if (url.pathname === '/api/jobs/upload' && request.method === 'POST') return uploadDurableJob(request, env, identity);
       if (url.pathname === '/api/jobs' && request.method === 'POST') return createLocalJob(request, env, identity);
-      if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getLocalJob(url, env, identity);
+      if (request.method === 'GET' && url.pathname.startsWith('/api/jobs/')) return getJob(url, env, identity);
       if (url.pathname === '/api/document-cleaning' && request.method === 'POST') return documentCleaningProcessor(request, env, identity);
     }
     if (request.method !== 'POST' || url.pathname !== '/api/analyze') return json({ error: 'POST /api/analyze only' }, 404);
@@ -46,6 +56,9 @@ export function createWorker({ identityFetcher = fetch } = {}) {
     if (!files.length) return json({ error: 'At least one media file is required.' }, 400);
     const findings = (await Promise.all(files.map((file) => analyzeMedia(file, env)))).flat();
     return json({ findings });
+    },
+    async queue(batch, env) {
+      for (const message of batch.messages) await consumeQueuedJob(message, env);
     },
   };
 }
@@ -65,6 +78,50 @@ async function createLocalJob(request, env, identity) {
   return json(serializeJobStatus(job, getConfiguration(env)), 202);
 }
 
+async function uploadDurableJob(request, env, identity) {
+  const configuration = getConfiguration(env);
+  if (!configuration.available) {
+    return json({ error: { code: 'processing-unconfigured', message: 'Private storage and the processing queue must be configured before files can be uploaded.' } }, 503);
+  }
+
+  let form;
+  try { form = await request.formData(); }
+  catch { return json({ error: 'Upload body must be multipart form data.' }, 400); }
+
+  const rawMetadata = form.get('metadata');
+  const file = form.get('file');
+  let metadata;
+  try { metadata = JSON.parse(String(rawMetadata ?? '')); }
+  catch { return json({ error: 'Upload metadata must be valid JSON.' }, 400); }
+
+  const validation = validateUploadMetadata(metadata, file);
+  if (!validation.valid) return json({ error: validation.error }, 400);
+
+  const job = createStoredJob(validation.value, identity.accountId);
+  const recordKey = jobRecordKey({ ownerAccountId: job.ownerAccountId, jobId: job.id });
+  try {
+    await env.MEDIA_BUCKET.put(job.input.key, file, { httpMetadata: { contentType: job.input.contentType } });
+  } catch {
+    return json({ error: { code: 'storage-unavailable', message: 'The private upload store is unavailable.' } }, 503);
+  }
+
+  try {
+    await env.MEDIA_BUCKET.put(recordKey, JSON.stringify(job), { httpMetadata: { contentType: 'application/json' } });
+  } catch {
+    await safeDelete(env.MEDIA_BUCKET, job.input.key);
+    return json({ error: { code: 'storage-unavailable', message: 'The private job store is unavailable.' } }, 503);
+  }
+
+  try {
+    await env.JOBS_QUEUE.send({ version: 1, jobId: job.id, ownerAccountId: identity.accountId });
+  } catch {
+    await Promise.all([safeDelete(env.MEDIA_BUCKET, job.input.key), safeDelete(env.MEDIA_BUCKET, recordKey)]);
+    return json({ error: { code: 'queue-unavailable', message: 'The processing queue is unavailable; the upload was not retained.' } }, 503);
+  }
+
+  return json(serializeJobStatus(job, configuration), 202);
+}
+
 async function documentCleaningProcessor(request, env) {
   let input;
   try { input = await request.json(); }
@@ -80,9 +137,18 @@ async function documentCleaningProcessor(request, env) {
   return json({ processor: { state: 'queued', available: true, output: null, message: 'The configured processor has not returned a clean document yet.' } }, 202);
 }
 
-function getLocalJob(url, env, identity) {
+async function getJob(url, env, identity) {
   const id = url.pathname.slice('/api/jobs/'.length);
   if (!id || id.includes('/')) return json({ error: 'Job not found.' }, 404);
+  if (env.MEDIA_BUCKET) {
+    try {
+      const stored = await readStoredJob(env.MEDIA_BUCKET, identity.accountId, id);
+      if (stored) return json(serializeJobStatus(stored, getConfiguration(env)));
+      return json({ error: 'Job not found.' }, 404);
+    } catch {
+      return json({ error: { code: 'storage-unavailable', message: 'The private job store is unavailable.' } }, 503);
+    }
+  }
   const job = localJobs.get(id);
   if (!job) return json({ error: 'Job not found.' }, 404);
   if (job.ownerAccountId !== identity.accountId) return json({ error: 'Job not found.' }, 404);
@@ -95,6 +161,54 @@ function isRemoteRoute(pathname) {
     || pathname === '/api/document-cleaning'
     || pathname === '/api/share'
     || pathname.startsWith('/api/share/');
+}
+
+async function safeDelete(bucket, key) {
+  try { await bucket.delete(key); } catch { /* Preserve the primary request error without leaking object details. */ }
+}
+
+async function consumeQueuedJob(message, env) {
+  const body = message?.body;
+  if (!body || body.version !== 1 || typeof body.jobId !== 'string' || typeof body.ownerAccountId !== 'string') {
+    message.ack();
+    return;
+  }
+  try {
+    const job = await readStoredJob(env.MEDIA_BUCKET, body.ownerAccountId, body.jobId);
+    if (!job || job.state !== 'queued') {
+      message.ack();
+      return;
+    }
+    const processing = transitionJob(job, 'processing');
+    await writeStoredJob(env.MEDIA_BUCKET, processing);
+    const failed = {
+      ...transitionJob(processing, 'failed'),
+      output: null,
+      failure: {
+        code: 'processor-unavailable',
+        message: 'No media processor is configured for this job.',
+      },
+    };
+    await writeStoredJob(env.MEDIA_BUCKET, failed);
+    message.ack();
+  } catch {
+    if (typeof message.retry === 'function') message.retry();
+    else throw new Error('Queued job could not be processed.');
+  }
+}
+
+async function readStoredJob(bucket, ownerAccountId, jobId) {
+  const object = await bucket.get(jobRecordKey({ ownerAccountId, jobId }));
+  if (!object) return null;
+  const job = await object.json();
+  if (!job || job.ownerAccountId !== ownerAccountId || job.id !== jobId) return null;
+  return job;
+}
+
+function writeStoredJob(bucket, job) {
+  return bucket.put(jobRecordKey({ ownerAccountId: job.ownerAccountId, jobId: job.id }), JSON.stringify(job), {
+    httpMetadata: { contentType: 'application/json' },
+  });
 }
 
 async function requireRenvoyIdentity(request, env, fetcher) {
