@@ -16,7 +16,7 @@ import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
 import { requestRenvoySession } from './remote/renvoy-bridge.js';
-import { getRemoteJob, submitRemoteJob } from './remote/jobs.js';
+import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
 const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
@@ -243,6 +243,8 @@ async function refreshRemoteDocument() {
     if (status.job?.state === 'complete') {
       ui['clean-status'].textContent = 'Your private clean copy is ready to save.';
       ui['sanitize-note'].textContent = 'Your clean document is ready in Renvoy.';
+      state.remoteDocument = { ...state.remoteDocument, ready: true, documentType: state.documentPlan?.documentType };
+      ui['download-button'].disabled = false;
     } else if (status.job?.state === 'failed') {
       ui['clean-status'].textContent = 'The private document clean could not finish. Your original was not changed.';
     } else setTimeout(() => { void refreshRemoteDocument(); }, 2500);
@@ -408,7 +410,16 @@ function friendlyFinding(finding) {
   return { title: 'A private detail may need your attention', detail: 'This extra check found something worth reviewing before you share.' };
 }
 
-function downloadCleanCopy() { download(state.cleanFile, state.cleanFile.name, state.cleanFile.type); }
+async function downloadCleanCopy() {
+  if (state.remoteDocument?.ready) {
+    try {
+      const blob = await downloadRemoteJob(state.remoteDocument);
+      download(blob, state.remoteDocument.documentType === 'pdf' ? 'renitized-document.pdf' : 'renitized-document.office', blob.type);
+    } catch { ui['sanitize-note'].textContent = 'We could not save the private clean copy. Please try again.'; }
+    return;
+  }
+  if (state.cleanFile) download(state.cleanFile, state.cleanFile.name, state.cleanFile.type);
+}
 function downloadReport() { downloadPrivacyReport({ includeDetailedFindings: false }); }
 function downloadReceipt() { if (state.receipt) download(new Blob([JSON.stringify(state.receipt, null, 2)], { type: 'application/json' }), 'renitizer-cleaning-receipt.json', 'application/json'); }
 function renderShareSection() {
