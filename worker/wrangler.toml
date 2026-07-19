@@ -7,11 +7,13 @@ compatibility_date = "2026-07-18"
 #   wrangler secret put RENVOY_IDENTITY_VERIFICATION_URL
 # The endpoint is POST /v1/identity/renitizer/verify on the Renvoy runtime.
 #
-# Video-rendering deployment values. Keep the processor token in the Worker
-# secret store; only the Worker should be able to call the renderer:
+# Media processor deployment values. Keep the processor token in the Worker
+# secret store; only the Worker should be able to call either renderer:
 #   wrangler secret put PROCESSOR_AUTH_TOKEN
 # Configure PROCESSOR_URL as an environment variable for the private renderer's
 # /v1/render/video endpoint. Do not expose either value to the browser.
+# Configure DOCUMENT_PROCESSOR_URL as an environment variable for the private
+# document service's /v1/clean/document endpoint. Do not expose it to the browser.
 
 # Durable processing-job deployment prerequisites. Keep these disabled until
 # the real private R2 bucket and Queue have been provisioned. `POST

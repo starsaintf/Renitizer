@@ -49,7 +49,7 @@ The browser encrypts a clean copy before it leaves the device. `POST /api/shares
 
 Both the sender and the named recipient use their Renvoy identity to download `GET /api/shares/:shareId`; anyone else receives the same not-found response. `DELETE /api/shares/:shareId` lets only the sender revoke it, removing the encrypted package and access records. Expired packages are deleted on access and return a clear expired response. Downloaded packages are decrypted locally in the **Decrypt shared package** screen, so Renitizer hosting never performs decryption.
 
-Document-cleaning jobs use `kind: "document-cleaning"`, `documentType` (`pdf` or `office`), and a list of requested removal actions; raw JSON content is rejected. `POST /api/document-cleaning` is the optional processor contract. For real asynchronous processing, create a private R2 bucket, a Queue, and a dead-letter queue, then uncomment and replace the `MEDIA_BUCKET`, `JOBS_QUEUE`, producer, and consumer bindings in `worker/wrangler.toml`. Until both primary bindings exist, upload requests return `503 processing-unconfigured`; no file is accepted or retained.
+Document-cleaning jobs use `kind: "document-cleaning"`, `documentType` (`pdf` or `office`), and a list of requested removal actions; raw JSON content is rejected. With a private R2 bucket, Queue, `DOCUMENT_PROCESSOR_URL`, and `PROCESSOR_AUTH_TOKEN` configured, the Worker streams the private input to the document processor and stores a clean output only after it receives the expected document type. `GET /api/jobs/:id/output` then permits only the owning Renvoy account to download it. Until the private storage and Queue bindings exist, uploads return `503 processing-unconfigured`; no file is accepted or retained.
 
 ### Video renderer
 

@@ -10,6 +10,7 @@ import {
   getConfiguration,
   inputObjectKey,
   jobRecordKey,
+  documentOutputObjectKey,
   outputObjectKey,
   isJobState,
   serializeJobStatus,
@@ -359,6 +360,46 @@ test('queue consumer streams a video to the renderer and stores a completed priv
   assert.equal(request.url, 'https://renderer.example/v1/render/video');
   assert.equal(request.options.headers.Authorization, 'Bearer processor-secret');
   assert.deepEqual(JSON.parse(Buffer.from(request.options.headers['X-Renitizer-Video-Tracks'], 'base64url').toString('utf8')), record.redactions);
+  assert.equal(writes.some(({ key }) => key === current.output.key), true);
+});
+
+test('queue consumer streams a document to the dedicated processor and stores a completed private output', async () => {
+  const record = createStoredJob({
+    kind: 'document-cleaning', mediaKind: 'document', documentType: 'pdf', fileName: 'contract.pdf', mimeType: 'application/pdf', sizeBytes: 3,
+    requestedActions: ['remove-author', 'remove-comment'],
+  }, 'acct_renvoy_alice', () => 'job_document', () => '2026-07-19T00:00:00.000Z');
+  const recordKey = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  let current = record;
+  const writes = [];
+  const bucket = {
+    async get(key) {
+      if (key === recordKey) return { json: async () => current };
+      if (key === record.input.key) return { body: new Blob(['raw']).stream() };
+      return null;
+    },
+    async put(key, body, options) {
+      if (key === recordKey) current = JSON.parse(body);
+      writes.push({ key, body, options });
+    },
+  };
+  let request;
+  const testWorker = createWorker({ processorFetcher: async (url, options) => {
+    request = { url, options };
+    return new Response(new Blob(['clean']).stream(), { status: 200, headers: { 'Content-Type': 'application/pdf', 'X-Renitizer-Document-Type': 'pdf' } });
+  } });
+  let acknowledged = false;
+  await testWorker.queue({
+    messages: [{ body: { version: 1, jobId: record.id, ownerAccountId: record.ownerAccountId }, ack() { acknowledged = true; } }],
+  }, { MEDIA_BUCKET: bucket, DOCUMENT_PROCESSOR_URL: 'https://documents.example/v1/clean/document', PROCESSOR_AUTH_TOKEN: 'processor-secret' });
+
+  assert.equal(acknowledged, true);
+  assert.equal(current.state, 'complete');
+  assert.deepEqual(current.output, { key: documentOutputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id, documentType: 'pdf' }), contentType: 'application/pdf' });
+  assert.equal(current.failure, null);
+  assert.equal(request.url, 'https://documents.example/v1/clean/document');
+  assert.equal(request.options.headers.Authorization, 'Bearer processor-secret');
+  assert.equal(request.options.headers['X-Renitizer-Document-Type'], 'pdf');
+  assert.equal(request.options.headers['Content-Type'], 'application/pdf');
   assert.equal(writes.some(({ key }) => key === current.output.key), true);
 });
 

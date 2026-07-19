@@ -8,9 +8,9 @@
 
 **Steps:**
 
-1. Build and test an Office Open XML sanitizer that removes document properties, comments, revisions, signatures, thumbnails, embedded fonts/objects, and their relationships while retaining visible content.
-2. Add a private PDF/Office HTTP processor container. PDF processing will use QPDF’s metadata, info, form/annotation, structure, and page-label removal capabilities; Office uses the sanitizer from step 1.
-3. Extend durable document jobs so the Worker streams a private R2 input to the processor and exposes a completed owner-only download only after a valid response.
+1. [x] Build and test an Office Open XML sanitizer that removes document properties, comments, revisions, signatures, thumbnails, embedded fonts/objects, and their relationships while retaining visible content.
+2. [x] Add a private PDF/Office HTTP processor container. PDF processing uses QPDF’s metadata, info, form/annotation, structure, and page-label removal capabilities; Office uses the sanitizer from step 1.
+3. [x] Extend durable document jobs so the Worker streams a private R2 input to the processor and exposes a completed owner-only download only after a valid response.
 4. Document deployment settings and run focused processor/worker tests, syntax checks, and the relevant app checks.
 
 **Validation:** `python3 -m unittest processor/document/test_office.py`; `node --test worker/test/jobs.test.js`; `npm run check`; `git diff --check`.

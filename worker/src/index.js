@@ -2,6 +2,7 @@ import { transcriptFindings } from './pii.js';
 import {
   createJob,
   createStoredJob,
+  documentOutputObjectKey,
   getConfiguration,
   jobRecordKey,
   outputObjectKey,
@@ -176,16 +177,20 @@ async function downloadJobOutput(jobId, env, identity) {
   try {
     const job = await readStoredJob(env.MEDIA_BUCKET, identity.accountId, jobId);
     if (!job?.output || job.state !== 'complete') return json({ error: 'Job output not found.' }, 404);
-    const expectedKey = outputObjectKey({ ownerAccountId: identity.accountId, jobId });
+    const expectedKey = job.kind === 'document-cleaning'
+      ? documentOutputObjectKey({ ownerAccountId: identity.accountId, jobId, documentType: job.documentType })
+      : outputObjectKey({ ownerAccountId: identity.accountId, jobId });
     if (job.output.key !== expectedKey) return json({ error: 'Job output not found.' }, 404);
     const output = await env.MEDIA_BUCKET.get(expectedKey);
     if (!output?.body) return json({ error: 'Job output not found.' }, 404);
-    const contentType = output.httpMetadata?.contentType === 'video/mp4' ? 'video/mp4' : 'application/octet-stream';
+    const contentType = job.kind === 'document-cleaning'
+      ? safeDocumentContentType(job.output.contentType, job.documentType)
+      : output.httpMetadata?.contentType === 'video/mp4' ? 'video/mp4' : 'application/octet-stream';
     return new Response(output.body, {
       headers: {
         ...cors,
         'Content-Type': contentType,
-        'Content-Disposition': 'attachment; filename="renitized-video.mp4"',
+        'Content-Disposition': `attachment; filename="${job.kind === 'document-cleaning' ? job.documentType === 'pdf' ? 'renitized-document.pdf' : 'renitized-document.office' : 'renitized-video.mp4'}"`,
         'Cache-Control': 'no-store',
       },
     });
@@ -323,6 +328,19 @@ async function consumeQueuedJob(message, env, processorFetcher) {
         return;
       }
     }
+    if (processing.kind === 'document-cleaning' && env.DOCUMENT_PROCESSOR_URL && env.PROCESSOR_AUTH_TOKEN) {
+      try {
+        const complete = await renderDocumentJob(processing, env, processorFetcher);
+        await writeStoredJob(env.MEDIA_BUCKET, complete);
+        message.ack();
+        return;
+      } catch {
+        const failed = processorFailure(processing, 'processor-failed', 'The document processor could not produce a clean document.');
+        await writeStoredJob(env.MEDIA_BUCKET, failed);
+        message.ack();
+        return;
+      }
+    }
     const failed = processorFailure(processing, 'processor-unavailable', 'No media processor is configured for this job.');
     await writeStoredJob(env.MEDIA_BUCKET, failed);
     message.ack();
@@ -355,12 +373,43 @@ async function renderVideoJob(job, env, processorFetcher) {
   };
 }
 
+async function renderDocumentJob(job, env, processorFetcher) {
+  const input = await env.MEDIA_BUCKET.get(job.input.key);
+  if (!input?.body) throw new Error('Document input is unavailable.');
+  const response = await processorFetcher(env.DOCUMENT_PROCESSOR_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.PROCESSOR_AUTH_TOKEN}`,
+      'Content-Type': job.input.contentType,
+      'X-Renitizer-Document-Type': job.documentType,
+    },
+    body: input.body,
+  });
+  const responseType = response.headers.get('Content-Type')?.split(';', 1)[0].toLowerCase();
+  const reportedType = response.headers.get('X-Renitizer-Document-Type');
+  const validResponse = job.documentType === 'pdf' ? responseType === 'application/pdf' : responseType === 'application/octet-stream';
+  if (!response.ok || !response.body || reportedType !== job.documentType || !validResponse) throw new Error('Document processor response is invalid.');
+  const key = documentOutputObjectKey({ ownerAccountId: job.ownerAccountId, jobId: job.id, documentType: job.documentType });
+  const contentType = safeDocumentContentType(job.input.contentType, job.documentType);
+  await env.MEDIA_BUCKET.put(key, response.body, { httpMetadata: { contentType } });
+  return {
+    ...transitionJob(job, 'complete'),
+    output: { key, contentType },
+    failure: null,
+  };
+}
+
 function processorFailure(job, code, message) {
   return {
     ...transitionJob(job, 'failed'),
     output: null,
     failure: { code, message },
   };
+}
+
+function safeDocumentContentType(value, documentType) {
+  if (documentType === 'pdf') return 'application/pdf';
+  return /^application\/(?:msword|vnd\.(?:openxmlformats-officedocument|ms-excel|ms-powerpoint)\.)/.test(value ?? '') ? value : 'application/octet-stream';
 }
 
 async function readStoredJob(bucket, ownerAccountId, jobId) {

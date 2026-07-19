@@ -123,6 +123,11 @@ export function outputObjectKey({ ownerAccountId, jobId }) {
   return `jobs/${accountId(ownerAccountId)}/${jobIdValue(jobId)}/output.mp4`;
 }
 
+export function documentOutputObjectKey({ ownerAccountId, jobId, documentType }) {
+  const extension = documentType === 'pdf' ? 'pdf' : 'office';
+  return `jobs/${accountId(ownerAccountId)}/${jobIdValue(jobId)}/output.${extension}`;
+}
+
 export function validateUploadMetadata(input, file) {
   const metadata = validateJobRequest(input);
   if (!metadata.valid) return metadata;
