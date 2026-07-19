@@ -37,6 +37,10 @@ The static app never has a secret and never automatically uploads a file. To ena
 
 Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or source control.
 
+## Shared Renvoy identity
+
+Native Renvoy/Renitizer hosts may expose `window.RenvoyRenitizer.getSession({ scope: 'renitizer:use' })`. Renitizer accepts only an HTTPS Worker origin and an opaque short-lived capability from that trusted host bridge; it never accepts credentials through a URL, form field, or saved browser setting.
+
 ### Processing-job API prerequisites
 
 `POST /api/jobs`, `GET /api/jobs/:id`, `POST /api/document-cleaning`, and the reserved `/api/share` prefix are account-protected remote routes. They use the same Renvoy device identity as the messaging product: the client sends `Authorization: Renvoy <capability>` and the Worker forwards it to Renvoy’s `POST /v1/identity/renitizer/verify` endpoint. Renvoy returns only an active account ID, device ID, and the `renitizer:use` grant; it never shares the capability-signing key or messaging scopes. Configure the Worker secret `RENVOY_IDENTITY_VERIFICATION_URL` with that Renvoy endpoint before enabling these routes. A missing configuration returns `503 identity-unconfigured`; invalid or revoked capabilities return `401 unauthorized`; a Renvoy outage returns `503 identity-unavailable`.
