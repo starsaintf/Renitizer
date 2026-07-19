@@ -28,7 +28,7 @@ jobs:
         run: |
           node --check src/main.js
           node --check worker/src/index.js
-          node --test test worker/test processor/video/test/filter.test.mjs processor/document/test_contract.mjs
+          node --test test/*.test.js worker/test/*.test.js processor/video/test/filter.test.mjs processor/document/test_contract.mjs
 
   processors:
     needs: verify
