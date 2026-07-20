@@ -76,10 +76,14 @@ jobs:
           RENVOY_IDENTITY_VERIFICATION_URL: ${{ secrets.RENVOY_IDENTITY_VERIFICATION_URL }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
-          for secret in PROCESSOR_AUTH_TOKEN VIDEO_PROCESSOR_URL DOCUMENT_PROCESSOR_URL RENVOY_IDENTITY_VERIFICATION_URL; do
-            test -n "${!secret}"
-            printf '%s' "${!secret}" | wrangler secret put "$secret"
-          done
+          test -n "$PROCESSOR_AUTH_TOKEN"
+          test -n "$VIDEO_PROCESSOR_URL"
+          test -n "$DOCUMENT_PROCESSOR_URL"
+          test -n "$RENVOY_IDENTITY_VERIFICATION_URL"
+          printf '%s' "$PROCESSOR_AUTH_TOKEN" | wrangler secret put PROCESSOR_AUTH_TOKEN
+          printf '%s' "$VIDEO_PROCESSOR_URL" | wrangler secret put PROCESSOR_URL
+          printf '%s' "$DOCUMENT_PROCESSOR_URL" | wrangler secret put DOCUMENT_PROCESSOR_URL
+          printf '%s' "$RENVOY_IDENTITY_VERIFICATION_URL" | wrangler secret put RENVOY_IDENTITY_VERIFICATION_URL
       - name: Deploy Worker
         working-directory: worker
         env:
