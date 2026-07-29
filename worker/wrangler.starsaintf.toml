@@ -1,0 +1,10 @@
+name = "renitizer-analysis"
+main = "src/index.js"
+compatibility_date = "2026-07-18"
+
+# Starsaintf's public release provides browser-local cleaning only. Hosted jobs
+# are intentionally left unbound until their own storage, processor, and identity
+# services are enabled under the Galee Labs deployment.
+[observability]
+enabled = true
+head_sampling_rate = 1

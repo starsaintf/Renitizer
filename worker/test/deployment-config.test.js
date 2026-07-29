@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
 const configUrl = new URL('../wrangler.toml', import.meta.url);
+const starsaintfConfigUrl = new URL('../wrangler.starsaintf.toml', import.meta.url);
 const workflowUrl = new URL('../../.github/workflows/production.yml', import.meta.url);
 
 test('production Worker configuration binds private media storage and a durable job queue', async () => {
@@ -16,9 +17,26 @@ test('production Worker configuration binds private media storage and a durable 
   assert.match(config, /^dead_letter_queue = "renitizer-processing-jobs-dlq"$/m);
 });
 
-test('production workflow maps the video processor endpoint to the Worker variable it reads', async () => {
+test('Starsaintf production workflow requires only its Cloudflare deploy token', async () => {
   const workflow = await fs.readFile(workflowUrl, 'utf8');
-  assert.match(workflow, /VIDEO_PROCESSOR_URL: \$\{\{ secrets\.VIDEO_PROCESSOR_URL \}\}/);
-  assert.match(workflow, /printf '%s' "\$VIDEO_PROCESSOR_URL" \| wrangler secret put PROCESSOR_URL/);
-  assert.doesNotMatch(workflow, /wrangler secret put "\$secret"/);
+  assert.match(workflow, /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
+  assert.doesNotMatch(workflow, /RENVOY_IDENTITY_VERIFICATION_URL: \$\{\{ secrets\./);
+  assert.doesNotMatch(workflow, /PROCESSOR_AUTH_TOKEN: \$\{\{ secrets\./);
+  assert.doesNotMatch(workflow, /VIDEO_PROCESSOR_URL: \$\{\{ secrets\./);
+  assert.doesNotMatch(workflow, /DOCUMENT_PROCESSOR_URL: \$\{\{ secrets\./);
+  assert.doesNotMatch(workflow, /docker\/build-push-action/);
+});
+
+test('Starsaintf deploys a local-only Worker without Renvoy or hosted-media bindings', async () => {
+  const [config, workflow] = await Promise.all([
+    fs.readFile(starsaintfConfigUrl, 'utf8'),
+    fs.readFile(workflowUrl, 'utf8'),
+  ]);
+
+  assert.match(config, /^name = "renitizer-analysis"$/m);
+  assert.doesNotMatch(config, /^\[\[r2_buckets\]\]$/m);
+  assert.doesNotMatch(config, /^\[\[queues\./m);
+  assert.match(workflow, /wrangler deploy --config wrangler\.starsaintf\.toml/);
+  assert.match(workflow, /wrangler secret delete RENVOY_IDENTITY_VERIFICATION_URL/);
+  assert.doesNotMatch(workflow, /RENVOY_IDENTITY_VERIFICATION_URL: \$\{\{ secrets\./);
 });
