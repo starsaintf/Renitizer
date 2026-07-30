@@ -12,7 +12,8 @@ Serve the repository root with any static server, then open `index.html`. For ex
 
 ## Local capability boundaries
 
-- Images: file facts, byte-level EXIF/XMP/IPTC/GPS/device marker checks, native QR/barcode scan, optional Tesseract OCR, and canvas re-encode.
+- Images: file facts, byte-level EXIF/XMP/IPTC/GPS/device marker checks, native face and QR/barcode checks where supported, optional Tesseract OCR, and canvas re-encode.
+- Faces: uses the browser's native `FaceDetector` when available. Unsupported browsers show an explicit unavailable result rather than claiming no faces were found.
 - OCR: Tesseract is imported from its CDN only when **Deep OCR scan** is clicked. It is not sent to Renitizer.
 - QR/barcodes: uses the browser's native `BarcodeDetector`; unsupported browsers return an explicit unavailable finding.
 - Audio: accepted for a report-only local workflow and, only after explicit consent, sent to the Worker transcription path. The Worker detects transcript email, phone, street-address, and name cues.

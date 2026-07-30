@@ -1,6 +1,7 @@
 import { scanFileFacts } from './scanners/file-facts.js';
 import { scanMetadata } from './scanners/metadata.js';
 import { scanBarcodes } from './scanners/barcode.js';
+import { scanFaces } from './scanners/face.js';
 import { scanOcr } from './scanners/ocr.js';
 import { requestCloudAnalysis } from './scanners/cloud.js';
 import { runScanners } from './scanners/orchestrator.js';
@@ -130,8 +131,8 @@ async function localScan() {
       state.findings = [{ id: 'document-processor-unavailable', category: 'capability', title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured document-cleaning processor.', severity: 'low', confidence: 1, assessment: 'unavailable', resolved: false }];
       state.availableChecks = new Set();
     } else {
-      state.findings = await runScanners(state.file, [scanFileFacts, scanMetadata, scanBarcodes]);
-      state.availableChecks = new Set(['metadata', 'barcodes']);
+      state.findings = await runScanners(state.file, [scanFileFacts, scanMetadata, scanBarcodes, scanFaces]);
+      state.availableChecks = new Set(['metadata', 'barcodes', 'faces']);
     }
     invalidateCleanVerification();
     state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
@@ -400,8 +401,9 @@ function editRedactionBox(event, id, resizing) {
 function friendlyFinding(finding) {
   if (finding.id.includes('gps')) return { title: 'Location details found', detail: 'This file may include where it was made.' };
   if (finding.id.includes('metadata') || finding.id.includes('verify-')) return { title: 'File details found', detail: finding.resolved ? 'These details were removed from your clean copy.' : 'This file may include details added by a device or app.' };
-  if (finding.id.includes('barcode')) return { title: 'A scannable code was found', detail: 'A code in the image may share information when scanned.' };
-  if (finding.id.includes('ocr-email')) return { title: 'An email address was found', detail: 'Writing in this image may include an email address.' };
+      if (finding.id.includes('barcode')) return { title: 'A scannable code was found', detail: 'A code in the image may share information when scanned.' };
+      if (finding.id.startsWith('face-')) return { title: 'A face was found', detail: 'You can blur, cover, or keep it before you share.' };
+      if (finding.id.includes('ocr-email')) return { title: 'An email address was found', detail: 'Writing in this image may include an email address.' };
   if (finding.id.includes('ocr-phone')) return { title: 'A phone number was found', detail: 'Writing in this image may include a phone number.' };
   if (finding.id.includes('ocr-visual-address')) return { title: 'An address may be visible', detail: 'Writing in this image may include part of an address.' };
   if (finding.id === 'document-processor-unavailable') return { title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured processor.' };
@@ -493,7 +495,7 @@ function idle(button, label) { button.disabled = false; button.textContent = lab
 function formatBytes(bytes) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
 async function rerunCleanScanners(file, availableChecks) {
-  const scanners = { metadata: scanMetadata, barcodes: scanBarcodes, visibleText: scanOcr };
+  const scanners = { metadata: scanMetadata, barcodes: scanBarcodes, faces: scanFaces, visibleText: scanOcr };
   const assessedChecks = [...availableChecks].filter((check) => check in scanners);
   const findings = (await Promise.all(assessedChecks.map(async (check) => {
     const results = await runScanners(file, [scanners[check]]);
