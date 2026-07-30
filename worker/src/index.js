@@ -37,10 +37,17 @@ const findingSchema = {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['id', 'category', 'title', 'detail', 'severity', 'confidence', 'recommendation'],
+        required: ['id', 'category', 'title', 'detail', 'severity', 'confidence', 'recommendation', 'boundingBox'],
         properties: {
           id: { type: 'string' }, category: { type: 'string' }, title: { type: 'string' }, detail: { type: 'string' },
           severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] }, confidence: { type: 'number' }, recommendation: { type: 'string' },
+          boundingBox: {
+            type: ['object', 'null'], additionalProperties: false, required: ['x', 'y', 'width', 'height'],
+            properties: {
+              x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+              width: { type: 'number', minimum: 0, maximum: 1 }, height: { type: 'number', minimum: 0, maximum: 1 },
+            },
+          },
         },
       },
     },
@@ -452,16 +459,20 @@ async function analyzeImage(file, env) {
   const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
   const upstream = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-4.1-mini',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'Analyze this user-provided image only for shareable privacy risks: visible addresses, email addresses, phone numbers, QR/barcodes, identity documents, screens, vehicle plates, and location clues such as readable signs, maps, recognizable landmarks, route displays, or dashboard GPS. Report the visible clue and its privacy risk; do not identify people or state a precise location as fact.' }, { type: 'input_image', image_url: `data:${file.type};base64,${base64}` }] }],
-      text: { format: { type: 'json_schema', name: 'privacy_findings', strict: true, schema: findingSchema } },
-    }),
+    body: JSON.stringify(buildImageVisionRequest(`data:${file.type};base64,${base64}`)),
   });
   if (!upstream.ok) return [unavailable('cloud-vision-failed', 'Vision provider request failed; local findings were retained.')];
   const response = await upstream.json();
   try { return JSON.parse(response.output_text).findings || []; }
   catch { return [unavailable('cloud-vision-unreadable', 'Vision provider returned an unreadable structured response.')]; }
+}
+
+export function buildImageVisionRequest(imageUrl) {
+  return {
+    model: 'gpt-4.1-mini',
+    input: [{ role: 'user', content: [{ type: 'input_text', text: 'Analyze this user-provided image only for shareable privacy risks: visible faces without identifying anyone, addresses, email addresses, phone numbers, QR/barcodes, identity documents, screens, vehicle plates, and location clues such as readable signs, maps, recognizable landmarks, route displays, or dashboard GPS. Report the visible clue and its privacy risk; do not identify people or state a precise location as fact. For each visual risk with a clearly identifiable region, include one normalized bounding box using fractional x, y, width, and height values between 0 and 1. Set boundingBox to null when you cannot locate the region confidently.' }, { type: 'input_image', image_url: imageUrl }] }],
+    text: { format: { type: 'json_schema', name: 'privacy_findings', strict: true, schema: findingSchema } },
+  };
 }
 
 async function transcribeAudio(file, env) {
