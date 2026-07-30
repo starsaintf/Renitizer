@@ -476,13 +476,20 @@ export function buildImageVisionRequest(imageUrl) {
 }
 
 async function transcribeAudio(file, env) {
-  const body = new FormData();
-  body.append('file', file, file.name || 'audio');
-  body.append('model', 'gpt-4o-mini-transcribe');
+  const body = buildTimestampedTranscriptionBody(file);
   const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body });
   if (!upstream.ok) return [unavailable('cloud-transcription-failed', 'Audio transcription provider request failed; local findings were retained.')];
   const payload = await upstream.json();
-  return transcriptFindings(payload.text || '');
+  return transcriptFindings(payload.text || '', payload.words);
+}
+
+export function buildTimestampedTranscriptionBody(file) {
+  const body = new FormData();
+  body.append('file', file, file.name || 'audio');
+  body.append('model', 'whisper-1');
+  body.append('response_format', 'verbose_json');
+  body.append('timestamp_granularities[]', 'word');
+  return body;
 }
 
 function unavailable(id, detail) { return { id, category: 'capability', title: 'Cloud media boundary', detail, severity: 'low', confidence: 1, recommendation: 'Use a provider path configured for this media type.', assessment: 'unavailable', resolved: false }; }

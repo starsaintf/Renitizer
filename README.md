@@ -16,7 +16,7 @@ Serve the repository root with any static server, then open `index.html`. For ex
 - Faces: uses the browser's native `FaceDetector` when available. Unsupported browsers show an explicit unavailable result rather than claiming no faces were found.
 - OCR: Tesseract is imported from its CDN only when **Deep OCR scan** is clicked. It is not sent to Renitizer.
 - QR/barcodes: uses the browser's native `BarcodeDetector`; unsupported browsers return an explicit unavailable finding.
-- Audio: accepted for a report-only local workflow and, only after explicit consent, sent to the Worker transcription path. The Worker detects transcript email, phone, street-address, and name cues.
+- Audio: users can choose exact times to mute or bleep in-browser, then save a clean WAV copy. With explicit consent, the Worker requests word timestamps from the transcription provider and uses them to make detected email, phone, street-address, and name cues reviewable by time when the transcript can be aligned. A chosen range is not reported as removed until the clean file is actually created.
 - Video: the browser locally samples up to three image frames and sends those frames to the existing cloud vision path only after explicit consent. If the browser cannot decode or encode frames, it reports that a dedicated cloud video endpoint is required.
 - Canvas clean copies: supported raster images only. They remove embedded metadata by re-encoding pixels and apply the redactions that the user reviews and approves.
 - PDF and Office documents: the browser can prepare a metadata-only document-cleaning request and safe status report. It does not inspect document internals, upload the document, or claim a clean document exists unless a separately configured processor returns one.
@@ -34,7 +34,7 @@ The static app never has a secret and never automatically uploads a file. To ena
 2. Deploy it with `wrangler deploy` and paste `https://your-worker.example/api/analyze` in the dashboard's Provider endpoint field.
 3. Check the clear consent box. Only then does the browser POST the selected file and requested analysis types.
 
-`worker/src/index.js` is an intentionally small sample that sends image files (including client-sampled video frames) to OpenAI's vision Responses API, and sends audio to `/v1/audio/transcriptions` before inspecting transcript PII cues. A video sent directly to the Worker gets a specific sampled-frame/dedicated-endpoint requirement. Put authentication, origin restrictions, size limits, and a provider-specific video path in front of a production deployment.
+`worker/src/index.js` sends image files (including client-sampled video frames) to OpenAI's vision Responses API. For actionable audio editing it sends audio to `/v1/audio/transcriptions` using `whisper-1`, `verbose_json`, and word timestamps before inspecting transcript PII cues. A video sent directly to the Worker gets a specific sampled-frame/dedicated-endpoint requirement. Put authentication, origin restrictions, size limits, and a provider-specific video path in front of a production deployment.
 
 Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or source control.
 

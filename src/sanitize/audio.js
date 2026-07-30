@@ -34,6 +34,31 @@ export function resolveAudioRedactionPlan({ findings = [], manualRanges = [], du
   return [...fromFindings, ...manual];
 }
 
+export function getAudioReviewItems({ findings = [], manualRanges = [] } = {}) {
+  const detected = findings.flatMap((finding) => reviewItem({
+    id: finding.id,
+    title: finding.title || 'Detected private audio',
+    range: finding.timeRange,
+    action: finding.redactionAction || 'keep',
+    source: 'detected',
+  }));
+  const manual = manualRanges.flatMap((range) => reviewItem({
+    id: range.id,
+    title: 'Time you chose',
+    range,
+    action: range.action,
+    source: 'manual',
+  }));
+  return [...detected, ...manual];
+}
+
+export function selectAudioFindingAction(findings = [], id, action) {
+  if (!['mute', 'bleep', 'keep'].includes(action)) return findings;
+  return findings.map((finding) => finding.id === id
+    ? { ...finding, redactionAction: action, resolved: false }
+    : finding);
+}
+
 export function resolvedAudioRanges(findings = []) {
   return findings.flatMap((finding) => {
     const range = finding.timeRange;
@@ -122,6 +147,14 @@ function audioSegments(plan, duration) {
     else segments.push({ action, start, end });
   }
   return segments;
+}
+
+function reviewItem({ id, title, range, action, source }) {
+  const start = Number(range?.start);
+  const end = Number(range?.end);
+  return typeof id === 'string' && Number.isFinite(start) && Number.isFinite(end) && end > start
+    ? [{ id, title: String(title), start, end, action: String(action || 'keep'), source }]
+    : [];
 }
 
 function encodeWav(buffer) {

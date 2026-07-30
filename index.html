@@ -97,6 +97,16 @@
             <div class="redaction-toolbar"><strong>Visible details</strong><span>Drag a box to move it. Drag its corner to resize.</span><button id="add-redaction-button" class="text-button" type="button">Add a box</button><button id="apply-all-button" class="text-button" type="button">Blur all marked</button></div>
             <div id="redaction-preview" class="redaction-preview" aria-label="Image redaction preview"></div>
           </div>
+          <section id="audio-advanced" class="audio-advanced" hidden aria-labelledby="audio-title">
+            <div><strong id="audio-title">Audio to remove</strong><span>Choose mute or bleep for anything you want removed.</span></div>
+            <div id="audio-range-list" class="audio-range-list"></div>
+            <div class="audio-manual-range">
+              <label>From <input id="audio-range-start" type="number" min="0" step="0.1" inputmode="decimal" aria-label="Start time in seconds"></label>
+              <label>to <input id="audio-range-end" type="number" min="0" step="0.1" inputmode="decimal" aria-label="End time in seconds"></label>
+              <select id="audio-range-action" aria-label="Manual audio action"><option value="mute">Mute</option><option value="bleep">Bleep</option></select>
+              <button id="add-audio-range-button" class="text-button" type="button">Add a time</button>
+            </div>
+          </section>
           <div class="actions"><button id="sanitize-button" class="button primary" type="button" disabled>Make a clean copy</button><button id="download-button" class="button quiet" type="button" disabled>Save clean copy</button></div>
           <p id="sanitize-note" class="microcopy"></p>
           <p id="clean-status" class="visually-hidden" aria-live="polite"></p>

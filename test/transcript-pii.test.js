@@ -38,3 +38,19 @@ test('transcriptFindings records an explicit name cue without identifying anyone
     recommendation: 'Trim, mute, or replace this spoken detail before sharing.', assessment: 'assessed', resolved: false,
   }]);
 });
+
+test('transcriptFindings maps a detected phone number to supplied word timestamps', () => {
+  const findings = transcriptFindings('Call me at +1 415 555 0123.', [
+    { word: 'Call', start: 0, end: 0.2 },
+    { word: 'me', start: 0.25, end: 0.4 },
+    { word: 'at', start: 0.45, end: 0.58 },
+    { word: '+1', start: 0.6, end: 0.76 },
+    { word: '415', start: 0.8, end: 1.1 },
+    { word: '555', start: 1.15, end: 1.45 },
+    { word: '0123.', start: 1.5, end: 1.82 },
+  ]);
+
+  const phone = findings.find((finding) => finding.id === 'audio-phone');
+  assert.deepEqual(phone.timeRange, { start: 0.6, end: 1.82 });
+  assert.equal(phone.redactionAction, 'keep');
+});

@@ -7,7 +7,7 @@ import { requestCloudAnalysis } from './scanners/cloud.js';
 import { runScanners } from './scanners/orchestrator.js';
 import { sanitizeRasterImage } from './sanitize/image.js';
 import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
-import { getAudioProcessingState, inspectAudioFile, resolveAudioRedactionPlan, sanitizeAudioFile } from './sanitize/audio.js';
+import { getAudioProcessingState, getAudioReviewItems, inspectAudioFile, resolveAudioRedactionPlan, sanitizeAudioFile, selectAudioFindingAction } from './sanitize/audio.js';
 import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
@@ -269,7 +269,7 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderShareSection(); }
+function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderAudioAdvanced(); renderShareSection(); }
 
 function render() {
   ui.findings.replaceChildren();
@@ -293,6 +293,17 @@ function render() {
         const button = document.createElement('button');
         button.className = 'text-button'; button.type = 'button'; button.textContent = action;
         button.addEventListener('click', () => { state.findings = setFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });
+        controls.append(button);
+      }
+      element.querySelector('div').append(controls);
+    }
+    if (state.file?.type.startsWith('audio/') && finding.timeRange) {
+      const controls = document.createElement('div');
+      controls.className = 'finding-actions';
+      for (const action of ['mute', 'bleep', 'keep']) {
+        const button = document.createElement('button');
+        button.className = 'text-button'; button.type = 'button'; button.textContent = action;
+        button.addEventListener('click', () => { state.findings = selectAudioFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });
         controls.append(button);
       }
       element.querySelector('div').append(controls);
@@ -360,6 +371,54 @@ function renderRedactionPreview() {
   image.src = state.previewUrl; image.alt = 'Selected image with editable redaction boxes';
   ui['redaction-preview'].append(image);
   for (const finding of state.findings.filter((item) => item.boundingBox)) renderRedactionBox(finding);
+}
+
+function renderAudioAdvanced() {
+  const isAudio = state.file?.type.startsWith('audio/');
+  ui['audio-advanced'].hidden = !isAudio;
+  if (!isAudio) return;
+  const duration = Number(state.audio.duration);
+  for (const input of [ui['audio-range-start'], ui['audio-range-end']]) input.max = Number.isFinite(duration) && duration > 0 ? String(duration) : '';
+  ui['audio-range-list'].replaceChildren();
+  const reviewItems = getAudioReviewItems({ findings: state.findings, manualRanges: state.audio.manualRanges });
+  if (!reviewItems.length) {
+    const empty = document.createElement('p');
+    empty.className = 'microcopy';
+    empty.textContent = 'After an extra audio check, any detected private part will appear here. You can also add a time yourself.';
+    ui['audio-range-list'].append(empty);
+    return;
+  }
+  for (const item of reviewItems) {
+    const row = document.createElement('div');
+    row.className = 'audio-range-item';
+    const label = document.createElement('span');
+    label.textContent = `${item.title} · ${formatTime(item.start)}–${formatTime(item.end)}`;
+    const action = document.createElement('span');
+    action.textContent = item.action;
+    row.append(label, action);
+    ui['audio-range-list'].append(row);
+  }
+}
+
+function addManualAudioRange() {
+  const start = Number(ui['audio-range-start'].value);
+  const end = Number(ui['audio-range-end'].value);
+  const duration = Number(state.audio.duration);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(duration) || start < 0 || end <= start || end > duration) {
+    ui['sanitize-note'].textContent = 'Enter a start and end time inside this audio file.';
+    return;
+  }
+  state.audio.manualRanges = [...state.audio.manualRanges, { id: `manual-audio-${Date.now()}`, start, end, action: ui['audio-range-action'].value }];
+  ui['audio-range-start'].value = '';
+  ui['audio-range-end'].value = '';
+  invalidateCleanVerification();
+  updateReport();
+}
+
+function formatTime(value) {
+  const seconds = Math.max(0, Number(value) || 0);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${(seconds - minutes * 60).toFixed(1).padStart(4, '0')}`;
 }
 
 function addRedactionBox() {
