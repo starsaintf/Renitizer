@@ -34,7 +34,7 @@ The static app never has a secret and never automatically uploads a file. To ena
 2. Deploy it with `wrangler deploy` and paste `https://your-worker.example/api/analyze` in the dashboard's Provider endpoint field.
 3. Check the clear consent box. Only then does the browser POST the selected file and requested analysis types.
 
-`worker/src/index.js` sends image files (including client-sampled video frames) to OpenAI's vision Responses API. For actionable audio editing it sends audio to `/v1/audio/transcriptions` using `whisper-1`, `verbose_json`, and word timestamps before inspecting transcript PII cues. A video sent directly to the Worker gets a specific sampled-frame/dedicated-endpoint requirement. Put authentication, origin restrictions, size limits, and a provider-specific video path in front of a production deployment.
+`worker/src/index.js` sends image files (including client-sampled video frames) to OpenAI's vision Responses API. It can flag visible privacy clues such as faces, plates, screens, documents, signs, maps, landmarks, and route displays, but these are clues to review—not proof of a person's identity, an exact place, or a reverse-image/OSINT match. For actionable audio editing it sends audio to `/v1/audio/transcriptions` using `whisper-1`, `verbose_json`, and word timestamps before inspecting transcript PII cues. A video sent directly to the Worker gets a specific sampled-frame/dedicated-endpoint requirement. Put authentication, origin restrictions, size limits, and a provider-specific video path in front of a production deployment.
 
 Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or source control.
 

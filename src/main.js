@@ -12,6 +12,7 @@ import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
+import { friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
@@ -581,20 +582,6 @@ function editRedactionBox(event, id, resizing) {
   };
   target.addEventListener('pointermove', move);
   target.addEventListener('pointerup', () => { target.removeEventListener('pointermove', move); invalidateCleanVerification(); updateReport(); }, { once: true });
-}
-
-function friendlyFinding(finding) {
-  if (finding.id.includes('gps')) return { title: 'Location details found', detail: 'This file may include where it was made.' };
-  if (finding.id.includes('metadata') || finding.id.includes('verify-')) return { title: 'File details found', detail: finding.resolved ? 'These details were removed from your clean copy.' : 'This file may include details added by a device or app.' };
-      if (finding.id.includes('barcode')) return { title: 'A scannable code was found', detail: 'A code in the image may share information when scanned.' };
-      if (finding.id.startsWith('face-')) return { title: 'A face was found', detail: 'You can blur, cover, or keep it before you share.' };
-      if (finding.id.includes('ocr-email')) return { title: 'An email address was found', detail: 'Writing in this image may include an email address.' };
-  if (finding.id.includes('ocr-phone')) return { title: 'A phone number was found', detail: 'Writing in this image may include a phone number.' };
-  if (finding.id.includes('ocr-visual-address')) return { title: 'An address may be visible', detail: 'Writing in this image may include part of an address.' };
-  if (finding.id === 'document-processor-unavailable') return { title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured processor.' };
-  if (finding.id.includes('unavailable')) return { title: 'One extra check was not available', detail: 'Your browser could not run every optional check.' };
-  if (finding.id === 'file-facts') return { title: 'Your file was checked', detail: 'We looked at the file and the details that can travel with it.' };
-  return { title: 'A private detail may need your attention', detail: 'This extra check found something worth reviewing before you share.' };
 }
 
 async function downloadCleanCopy() {

@@ -17,3 +17,15 @@ test('asks the vision provider for normalized editable boxes on visual risks', (
   assert.match(prompt, /boundingBox to null/i);
   assert.match(prompt, /faces.*without identifying/i);
 });
+
+test('asks cloud vision to classify visible clues without claiming an OSINT match', () => {
+  const request = buildImageVisionRequest('data:image/jpeg;base64,abc');
+  const prompt = request.input[0].content[0].text;
+  const category = request.text.format.schema.properties.findings.items.properties.category;
+
+  assert.match(prompt, /Use only these categories/i);
+  assert.match(prompt, /vehicle-plate/i);
+  assert.match(prompt, /street-sign/i);
+  assert.match(prompt, /not a reverse-image, identity, or location match/i);
+  assert.deepEqual(category.enum, ['face', 'address', 'email', 'phone', 'qr', 'barcode', 'id-card', 'screen', 'vehicle-plate', 'street-sign', 'map', 'landmark', 'route-display', 'dashboard-gps', 'location-clue']);
+});

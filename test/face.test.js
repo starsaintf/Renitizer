@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { scanFaces } from '../src/scanners/face.js';
+import { friendlyFinding } from '../src/core/friendly-findings.js';
 
 test('creates an editable normalized finding for each detected face', async () => {
   let closed = false;
@@ -41,8 +42,9 @@ test('includes the face scanner in Renitizer’s standard image check', async ()
   assert.match(app, /faces: scanFaces/);
 });
 
-test('uses plain language for a detected face in the app', async () => {
-  const app = await fs.readFile(new URL('../src/main.js', import.meta.url), 'utf8');
-
-  assert.match(app, /if \(finding\.id\.startsWith\('face-'\)\) return \{ title: 'A face was found'/);
+test('uses plain language for a detected face in the app', () => {
+  assert.deepEqual(friendlyFinding({ id: 'face-1', category: 'face' }), {
+    title: 'A face was found',
+    detail: 'You can blur, cover, or keep it before you share.',
+  });
 });

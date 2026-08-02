@@ -30,6 +30,11 @@ const cors = {
 
 const localJobs = new Map();
 
+const visualFindingCategories = [
+  'face', 'address', 'email', 'phone', 'qr', 'barcode', 'id-card', 'screen',
+  'vehicle-plate', 'street-sign', 'map', 'landmark', 'route-display', 'dashboard-gps', 'location-clue',
+];
+
 const findingSchema = {
   type: 'object', additionalProperties: false, required: ['findings'],
   properties: {
@@ -39,7 +44,7 @@ const findingSchema = {
         type: 'object', additionalProperties: false,
         required: ['id', 'category', 'title', 'detail', 'severity', 'confidence', 'recommendation', 'boundingBox'],
         properties: {
-          id: { type: 'string' }, category: { type: 'string' }, title: { type: 'string' }, detail: { type: 'string' },
+          id: { type: 'string' }, category: { type: 'string', enum: visualFindingCategories }, title: { type: 'string' }, detail: { type: 'string' },
           severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] }, confidence: { type: 'number' }, recommendation: { type: 'string' },
           boundingBox: {
             type: ['object', 'null'], additionalProperties: false, required: ['x', 'y', 'width', 'height'],
@@ -498,7 +503,7 @@ export function attachFrameTiming(findings, context) {
 export function buildImageVisionRequest(imageUrl) {
   return {
     model: 'gpt-4.1-mini',
-    input: [{ role: 'user', content: [{ type: 'input_text', text: 'Analyze this user-provided image only for shareable privacy risks: visible faces without identifying anyone, addresses, email addresses, phone numbers, QR/barcodes, identity documents, screens, vehicle plates, and location clues such as readable signs, maps, recognizable landmarks, route displays, or dashboard GPS. Report the visible clue and its privacy risk; do not identify people or state a precise location as fact. For each visual risk with a clearly identifiable region, include one normalized bounding box using fractional x, y, width, and height values between 0 and 1. Set boundingBox to null when you cannot locate the region confidently.' }, { type: 'input_image', image_url: imageUrl }] }],
+    input: [{ role: 'user', content: [{ type: 'input_text', text: `Analyze this user-provided image only for shareable privacy risks. Use only these categories: ${visualFindingCategories.join(', ')}. Treat faces as privacy risks without identifying anyone. Report a visible clue and its privacy risk; do not identify people or state a precise location as fact. This is a visual privacy check, not a reverse-image, identity, or location match. For each visual risk with a clearly identifiable region, include one normalized bounding box using fractional x, y, width, and height values between 0 and 1. Set boundingBox to null when you cannot locate the region confidently.` }, { type: 'input_image', image_url: imageUrl }] }],
     text: { format: { type: 'json_schema', name: 'privacy_findings', strict: true, schema: findingSchema } },
   };
 }

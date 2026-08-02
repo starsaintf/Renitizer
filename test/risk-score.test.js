@@ -55,6 +55,19 @@ test('groupSignals groups the five supported evidence types', () => {
   });
 });
 
+test('groupSignals includes cloud visual location and identity clues without treating them as reverse-image evidence', () => {
+  const landmark = { category: 'landmark' };
+  const streetSign = { category: 'street-sign' };
+  const plate = { category: 'vehicle-plate' };
+  const identityCard = { category: 'id-card' };
+
+  const signals = groupSignals([landmark, streetSign, plate, identityCard]);
+
+  assert.deepEqual(signals.location, [landmark, streetSign]);
+  assert.deepEqual(signals.identity, [plate, identityCard]);
+  assert.deepEqual(signals.reverseImage, []);
+});
+
 test('makeReport exposes unresolved residual risks and finding counts', () => {
   const openRisk = { id: 'address', category: 'address', severity: 'high', confidence: 1, resolved: false };
   const fixedRisk = { id: 'camera', category: 'device', severity: 'medium', confidence: 1, resolved: true };

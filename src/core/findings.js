@@ -1,6 +1,6 @@
 const signalCategories = {
-  location: new Set(['address', 'gps', 'location']),
-  identity: new Set(['barcode', 'email', 'face', 'identity', 'name', 'phone', 'qr']),
+  location: new Set(['address', 'gps', 'location', 'landmark', 'location-clue', 'street-sign', 'road-name', 'map', 'route-display', 'dashboard-gps', 'place-name', 'business-name']),
+  identity: new Set(['barcode', 'email', 'face', 'identity', 'name', 'phone', 'qr', 'vehicle-plate', 'license-plate', 'id-card', 'passport', 'bank-card', 'screen', 'document', 'mail', 'shipping-label']),
   device: new Set(['device', 'device-fingerprint', 'metadata']),
   visualAddress: new Set(['visual-address']),
   reverseImage: new Set(['reverse-image']),
