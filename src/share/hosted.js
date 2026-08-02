@@ -1,10 +1,10 @@
 const ACCOUNT_ID = /^acct_[A-Za-z0-9_-]{2,120}$/;
 const SHARE_ID = /^share_[A-Za-z0-9_-]{8,128}$/;
 
-export async function createHostedShare({ session, envelope, recipientAccountId, expiresAt, fetcher = fetch, FileCtor = File } = {}) {
+export async function createHostedShare({ session, envelope, recipientAccountId, expiresAt, fetcher = fetch, FileCtor = File, now = () => Date.now() } = {}) {
   const endpoint = trustedEndpoint(session);
   if (!ACCOUNT_ID.test(String(recipientAccountId || ''))) throw new Error('Choose a valid recipient Renvoy account.');
-  if (!validFutureExpiry(expiresAt)) throw new Error('Choose a future share expiry.');
+  if (!validFutureExpiry(expiresAt, now)) throw new Error('Choose a future share expiry.');
   if (containsRecoverySecret(envelope)) throw new Error('The recovery key must stay with you and cannot be uploaded.');
   if (typeof FileCtor !== 'function') throw new Error('This browser cannot prepare an encrypted package for hosted sharing.');
   let encoded;
@@ -44,7 +44,11 @@ function trustedEndpoint(session) {
   return url.origin;
 }
 
-function validFutureExpiry(value) { return Number.isFinite(Date.parse(value)) && Date.parse(value) > Date.now(); }
+function validFutureExpiry(value, now) {
+  const currentTime = Number(now?.());
+  const expiryTime = Date.parse(value);
+  return Number.isFinite(currentTime) && Number.isFinite(expiryTime) && expiryTime > currentTime;
+}
 
 function containsRecoverySecret(value) {
   if (!value || typeof value !== 'object') return false;

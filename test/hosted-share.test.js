@@ -34,6 +34,20 @@ test('rejects an invalid recipient or recovery secret before uploading', async (
   await assert.rejects(() => createHostedShare({ session, envelope: { ...envelope, recoveryKey: 'secret' }, recipientAccountId: 'acct_renvoy_bob', expiresAt: '2026-08-09T12:00:00.000Z', FileCtor: File }), /recovery key/i);
 });
 
+test('validates hosted-share expiry against an injected current time', async () => {
+  const result = await createHostedShare({
+    session,
+    envelope,
+    recipientAccountId: 'acct_renvoy_bob',
+    expiresAt: '2026-08-01T12:00:00.000Z',
+    now: () => Date.parse('2026-07-31T12:00:00.000Z'),
+    FileCtor: File,
+    fetcher: async () => Response.json({ share: { id: 'share_12345678' } }, { status: 201 }),
+  });
+
+  assert.equal(result.share.id, 'share_12345678');
+});
+
 test('downloads and revokes a hosted package only through a valid share id', async () => {
   const downloaded = await downloadHostedShare({
     session, shareId: 'share_12345678',
