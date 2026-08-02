@@ -19,6 +19,7 @@ import { createHostedShare, downloadHostedShare, revokeHostedShare } from './sha
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
+import { buildVideoSampleTimes } from './video/sampling.js';
 import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
@@ -771,7 +772,7 @@ async function extractVideoFrames(file) {
     if (!Number.isFinite(video.duration) || video.duration <= 0) throw new Error('Video unavailable');
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    const times = [...new Set([0, video.duration * 0.5, Math.max(0, video.duration - 0.1)].map((time) => Math.min(Math.max(time, 0), Math.max(video.duration - 0.01, 0))))];
+    const times = buildVideoSampleTimes(video.duration);
     const frames = [];
     for (const [index, time] of times.entries()) {
       if (index > 0) { video.currentTime = time; await waitFor(video, 'seeked'); }

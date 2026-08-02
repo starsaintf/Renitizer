@@ -9,6 +9,8 @@ test('the workspace preserves sampled-video timing when requesting cloud analysi
   ]);
 
   assert.match(app, /frameContext: frameSamples\?\.map/);
+  assert.match(app, /import \{ buildVideoSampleTimes \} from '\.\/video\/sampling\.js';/);
+  assert.match(app, /const times = buildVideoSampleTimes\(video\.duration\);/);
   assert.match(app, /return frames;/);
   assert.match(app, /time, duration/);
   assert.match(page, /id="video-advanced"/);
