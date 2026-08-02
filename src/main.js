@@ -14,6 +14,7 @@ import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
+import { getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
@@ -606,9 +607,12 @@ async function downloadCleanCopy() {
 }
 function downloadReport() { downloadPrivacyReport({ includeDetailedFindings: false }); }
 function downloadReceipt() { if (state.receipt) download(new Blob([JSON.stringify(state.receipt, null, 2)], { type: 'application/json' }), 'renitizer-cleaning-receipt.json', 'application/json'); }
+function getCurrentShareableOutput() { return getShareableCleanOutput({ cleanFile: state.cleanFile, remoteVideo: state.remoteVideo, remoteDocument: state.remoteDocument }); }
+function getCurrentShareState() { return getShareState({ hasCleanCopy: Boolean(getCurrentShareableOutput()), expiry: ui['share-expiry'].value }); }
+async function resolveCurrentShareableOutput() { return resolveShareableCleanOutput({ cleanFile: state.cleanFile, remoteVideo: state.remoteVideo, remoteDocument: state.remoteDocument, downloadRemoteJob }); }
 function renderShareSection() {
-  const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
-  ui['share-section'].hidden = !state.cleanFile;
+  const shareState = getCurrentShareState();
+  ui['share-section'].hidden = !getCurrentShareableOutput();
   ui['share-package-button'].disabled = !shareState.available;
   ui['share-key-button'].disabled = !state.share;
   ui['share-report-button'].disabled = !shareState.available;
@@ -625,15 +629,18 @@ function makeShareReport(shareState) {
   });
 }
 async function createEncryptedPackage() {
-  const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
+  const shareState = getCurrentShareState();
   if (!shareState.available) { ui['share-status'].textContent = shareState.message; return; }
   busy(ui['share-package-button'], 'Encrypting…');
   try {
-    state.share = await encryptCleanCopy(state.cleanFile, { expiresAt: shareState.expiresAt, report: makeShareReport(shareState) });
+    const cleanOutput = await resolveCurrentShareableOutput();
+    if (!cleanOutput) throw new Error('No clean output is ready to share.');
+    state.cleanFile = cleanOutput;
+    state.share = await encryptCleanCopy(cleanOutput, { expiresAt: shareState.expiresAt, report: makeShareReport(shareState) });
     download(new Blob([JSON.stringify(state.share.envelope, null, 2)], { type: 'application/json' }), 'renitizer-encrypted-package.json', 'application/json');
     ui['share-status'].textContent = 'Encrypted package downloaded. Save the recovery key separately; it is not inside the package.';
   } catch (error) {
-    ui['share-status'].textContent = 'This browser could not create an encrypted package.';
+    ui['share-status'].textContent = 'We could not prepare the clean file for an encrypted package. Your original was not changed.';
   } finally {
     idle(ui['share-package-button'], 'Create & download encrypted package');
     renderShareSection();
@@ -645,7 +652,7 @@ function downloadRecoveryKey() {
   ui['share-status'].textContent = 'Recovery key downloaded. Keep it separate from the encrypted package.';
 }
 function downloadShareReport() {
-  const shareState = getShareState({ hasCleanCopy: Boolean(state.cleanFile), expiry: ui['share-expiry'].value });
+  const shareState = getCurrentShareState();
   if (!shareState.available) return;
   downloadPrivacyReport({ expiresAt: shareState.expiresAt, includeDetailedFindings: ui['share-detailed-findings'].checked });
 }
