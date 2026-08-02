@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { File } from 'node:buffer';
-import { getShareableCleanOutput, resolveShareableCleanOutput } from '../src/share/remote-output.js';
+import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from '../src/share/remote-output.js';
 
 test('prefers a browser-created clean file without fetching a remote job', async () => {
   const cleanFile = new File(['clean'], 'photo-clean.jpg', { type: 'image/jpeg' });
@@ -42,4 +42,15 @@ test('uses a generic safe name for a completed Office output', async () => {
 
   assert.equal(resolved.name, 'renitized-document.office');
   assert.equal(resolved.type, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+});
+
+test('replaces an identifying clean filename before package encryption', async () => {
+  const packageFile = createGenericPackageFile(
+    new File(['clean pixels'], 'passport-and-home-address-clean.jpeg', { type: 'image/jpeg' }),
+    File,
+  );
+
+  assert.equal(packageFile.name, 'renitizer-clean-copy.jpg');
+  assert.equal(packageFile.type, 'image/jpeg');
+  assert.equal(await packageFile.text(), 'clean pixels');
 });

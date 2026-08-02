@@ -21,3 +21,19 @@ export async function resolveShareableCleanOutput({ cleanFile = null, remoteVide
   if (!(blob instanceof Blob) || !blob.size) throw new Error('The clean output could not be downloaded.');
   return new FileCtor([blob], output.fileName, { type: blob.type || output.mimeType || 'application/octet-stream' });
 }
+
+export function createGenericPackageFile(cleanOutput, FileCtor = File) {
+  if (!cleanOutput || typeof cleanOutput.arrayBuffer !== 'function' || typeof FileCtor !== 'function') throw new Error('The clean output cannot be prepared for sharing.');
+  const mimeType = cleanOutput.type || 'application/octet-stream';
+  return new FileCtor([cleanOutput], `renitizer-clean-copy${extensionForMimeType(mimeType)}`, { type: mimeType });
+}
+
+function extensionForMimeType(mimeType) {
+  return ({
+    'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'image/avif': '.avif',
+    'audio/wav': '.wav', 'video/mp4': '.mp4', 'application/pdf': '.pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  })[mimeType] || '';
+}

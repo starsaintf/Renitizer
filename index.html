@@ -49,6 +49,14 @@
           <input id="recovery-key-input" class="file-picker" type="file" accept="application/json,.json">
           <div class="actions"><button id="decrypt-package-button" class="button primary" type="button">Open &amp; save clean file</button></div>
           <p id="decrypt-status" class="microcopy" aria-live="polite">Choose both files to begin.</p>
+          <details id="receive-hosted-details" class="verification-details">
+            <summary>Get a package from Renvoy</summary>
+            <p>Enter the Share ID the sender gave you. Only the Renvoy account they chose can get the encrypted package. You still need the recovery key separately.</p>
+            <label class="field-label" for="receive-share-id">Share ID</label>
+            <input id="receive-share-id" class="file-picker" type="text" inputmode="text" autocomplete="off" placeholder="share_…">
+            <div class="actions"><button id="receive-hosted-button" class="button quiet" type="button">Get encrypted package</button></div>
+            <p id="receive-hosted-status" class="microcopy" aria-live="polite"></p>
+          </details>
         </section>
       </section>
 
@@ -127,7 +135,7 @@
           </details>
           <section id="share-section" class="share-section" hidden aria-labelledby="share-title">
             <div><p class="step-number">Optional</p><h3 id="share-title">Share safely</h3></div>
-            <p>Create an encrypted package for the clean copy. This app does not upload it or create a public link.</p>
+            <p>Create an encrypted package for the clean copy. By default it only downloads to your device; you can optionally send that encrypted package to one Renvoy account.</p>
             <label class="field-label" for="share-expiry">Package expiry</label>
             <select id="share-expiry"><option value="1-day">1 day</option><option value="7-days" selected>7 days</option><option value="30-days">30 days</option></select>
             <p class="microcopy">Expiry is recorded in the package, but a downloaded file cannot enforce deletion after you send it.</p>
@@ -135,6 +143,14 @@
             <div class="actions"><button id="share-package-button" class="button primary" type="button" disabled>Create &amp; download encrypted package</button><button id="share-key-button" class="button quiet" type="button" disabled>Save recovery key</button><button id="share-report-button" class="text-button" type="button" disabled>Download privacy report</button></div>
             <p id="share-delivery" class="microcopy"></p>
             <p id="share-status" class="microcopy" aria-live="polite"></p>
+            <details id="share-hosted-details" class="verification-details" hidden>
+              <summary>Send privately with Renvoy</summary>
+              <p>Renvoy stores only your encrypted package for one person. Save the recovery key first, then send that key separately.</p>
+              <label class="field-label" for="share-recipient-account">Recipient’s Renvoy account</label>
+              <input id="share-recipient-account" class="file-picker" type="text" inputmode="text" autocomplete="off" placeholder="acct_…">
+              <div class="actions"><button id="share-hosted-button" class="button quiet" type="button" disabled>Send encrypted package</button><button id="share-revoke-button" class="text-button" type="button" hidden>Revoke this share</button></div>
+              <p id="share-hosted-status" class="microcopy" aria-live="polite"></p>
+            </details>
           </section>
         </section>
 

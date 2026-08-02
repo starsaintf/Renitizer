@@ -14,7 +14,8 @@ import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
-import { getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
+import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
+import { createHostedShare, downloadHostedShare, revokeHostedShare } from './share/hosted.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
@@ -22,8 +23,8 @@ import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -38,11 +39,16 @@ ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
 ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); invalidateCleanVerification(); updateReport(); });
 ui['add-audio-range-button']?.addEventListener('click', addManualAudioRange);
-ui['share-expiry'].addEventListener('change', () => { state.share = null; renderShareSection(); });
-ui['share-detailed-findings'].addEventListener('change', () => { state.share = null; renderShareSection(); });
+ui['share-expiry'].addEventListener('change', resetSharePackage);
+ui['share-detailed-findings'].addEventListener('change', resetSharePackage);
 ui['share-package-button'].addEventListener('click', createEncryptedPackage);
 ui['share-key-button'].addEventListener('click', downloadRecoveryKey);
 ui['share-report-button'].addEventListener('click', downloadShareReport);
+ui['share-hosted-button'].addEventListener('click', createHostedEncryptedShare);
+ui['share-revoke-button'].addEventListener('click', revokeCurrentHostedShare);
+ui['share-recipient-account'].addEventListener('input', () => { state.hostedShare = null; renderShareSection(); });
+ui['receive-hosted-button'].addEventListener('click', downloadIncomingHostedShare);
+ui['encrypted-package-input'].addEventListener('change', () => { state.receivedHostedPackage = null; });
 ui['receipt-report-button'].addEventListener('click', downloadReceipt);
 ui['decrypt-package-button'].addEventListener('click', decryptSharedPackage);
 window.addEventListener('hashchange', renderView);
@@ -66,6 +72,8 @@ async function selectFile(file) {
   state.receiptReady = false;
   state.verification = null;
   state.share = null;
+  state.recoveryKeySaved = false;
+  state.hostedShare = null;
   state.availableChecks = new Set();
   state.documentPlan = null;
   state.documentRequest = null;
@@ -610,6 +618,12 @@ function downloadReceipt() { if (state.receipt) download(new Blob([JSON.stringif
 function getCurrentShareableOutput() { return getShareableCleanOutput({ cleanFile: state.cleanFile, remoteVideo: state.remoteVideo, remoteDocument: state.remoteDocument }); }
 function getCurrentShareState() { return getShareState({ hasCleanCopy: Boolean(getCurrentShareableOutput()), expiry: ui['share-expiry'].value }); }
 async function resolveCurrentShareableOutput() { return resolveShareableCleanOutput({ cleanFile: state.cleanFile, remoteVideo: state.remoteVideo, remoteDocument: state.remoteDocument, downloadRemoteJob }); }
+function resetSharePackage() {
+  state.share = null;
+  state.recoveryKeySaved = false;
+  state.hostedShare = null;
+  renderShareSection();
+}
 function renderShareSection() {
   const shareState = getCurrentShareState();
   ui['share-section'].hidden = !getCurrentShareableOutput();
@@ -618,6 +632,12 @@ function renderShareSection() {
   ui['share-report-button'].disabled = !shareState.available;
   ui['share-delivery'].textContent = shareState.message;
   if (!state.share) ui['share-status'].textContent = '';
+  ui['share-hosted-details'].hidden = !state.share;
+  ui['share-hosted-button'].disabled = !state.share || !state.recoveryKeySaved;
+  ui['share-revoke-button'].hidden = !state.hostedShare;
+  ui['share-revoke-button'].disabled = !state.hostedShare;
+  if (!state.share) ui['share-hosted-status'].textContent = '';
+  else if (!state.recoveryKeySaved) ui['share-hosted-status'].textContent = 'Save your recovery key before sending this package.';
 }
 function makeShareReport(shareState) {
   return createSafeShareReport({
@@ -636,7 +656,9 @@ async function createEncryptedPackage() {
     const cleanOutput = await resolveCurrentShareableOutput();
     if (!cleanOutput) throw new Error('No clean output is ready to share.');
     state.cleanFile = cleanOutput;
-    state.share = await encryptCleanCopy(cleanOutput, { expiresAt: shareState.expiresAt, report: makeShareReport(shareState) });
+    state.share = await encryptCleanCopy(createGenericPackageFile(cleanOutput), { expiresAt: shareState.expiresAt, report: makeShareReport(shareState) });
+    state.recoveryKeySaved = false;
+    state.hostedShare = null;
     download(new Blob([JSON.stringify(state.share.envelope, null, 2)], { type: 'application/json' }), 'renitizer-encrypted-package.json', 'application/json');
     ui['share-status'].textContent = 'Encrypted package downloaded. Save the recovery key separately; it is not inside the package.';
   } catch (error) {
@@ -649,7 +671,35 @@ async function createEncryptedPackage() {
 function downloadRecoveryKey() {
   if (!state.share) return;
   download(new Blob([JSON.stringify({ format: 'renitizer-recovery-key-v1', algorithm: 'AES-256-GCM', expiresAt: state.share.envelope.expiresAt, recoveryKey: state.share.recoveryKey }, null, 2)], { type: 'application/json' }), 'renitizer-recovery-key.json', 'application/json');
+  state.recoveryKeySaved = true;
   ui['share-status'].textContent = 'Recovery key downloaded. Keep it separate from the encrypted package.';
+  renderShareSection();
+}
+async function createHostedEncryptedShare() {
+  if (!state.share) return;
+  if (!state.recoveryKeySaved) { ui['share-hosted-status'].textContent = 'Save your recovery key before sending this package.'; return; }
+  const recipientAccountId = ui['share-recipient-account'].value.trim();
+  if (!recipientAccountId) { ui['share-hosted-status'].textContent = 'Enter the Renvoy account of the person you want to receive it.'; return; }
+  busy(ui['share-hosted-button'], 'Sending…');
+  try {
+    const session = await requestRenvoySession();
+    if (!session.available) { ui['share-hosted-status'].textContent = 'Open Renitizer from Renvoy to send an encrypted package.'; return; }
+    const result = await createHostedShare({ session, envelope: state.share.envelope, recipientAccountId, expiresAt: state.share.envelope.expiresAt });
+    state.hostedShare = { session, ...result.share };
+    ui['share-hosted-status'].textContent = `Sent privately. Share ID: ${result.share.id}. Send the recovery key separately.`;
+  } catch {
+    ui['share-hosted-status'].textContent = 'We could not send the encrypted package. Your original was not changed.';
+  } finally { idle(ui['share-hosted-button'], 'Send encrypted package'); renderShareSection(); }
+}
+async function revokeCurrentHostedShare() {
+  if (!state.hostedShare) return;
+  busy(ui['share-revoke-button'], 'Revoking…');
+  try {
+    await revokeHostedShare(state.hostedShare);
+    state.hostedShare = null;
+    ui['share-hosted-status'].textContent = 'This encrypted share was revoked.';
+  } catch { ui['share-hosted-status'].textContent = 'We could not revoke this encrypted share.'; }
+  finally { idle(ui['share-revoke-button'], 'Revoke this share'); renderShareSection(); }
 }
 function downloadShareReport() {
   const shareState = getCurrentShareState();
@@ -661,8 +711,21 @@ function downloadPrivacyReport({ expiresAt = null, includeDetailedFindings = fal
   download(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), 'renitizer-privacy-report.json', 'application/json');
 }
 function download(blob, name) { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); }
+async function downloadIncomingHostedShare() {
+  const shareId = ui['receive-share-id'].value.trim();
+  if (!shareId) { ui['receive-hosted-status'].textContent = 'Enter the Share ID from the sender.'; return; }
+  busy(ui['receive-hosted-button'], 'Getting package…');
+  try {
+    const session = await requestRenvoySession();
+    if (!session.available) { ui['receive-hosted-status'].textContent = 'Open Renitizer from Renvoy to get this package.'; return; }
+    const blob = await downloadHostedShare({ session, shareId });
+    state.receivedHostedPackage = new File([blob], 'renitizer-encrypted-package.json', { type: 'application/json' });
+    ui['receive-hosted-status'].textContent = 'Encrypted package received. Choose the separate recovery key, then open your clean copy.';
+  } catch { ui['receive-hosted-status'].textContent = 'We could not get this encrypted package. Check the Share ID and your Renvoy account.'; }
+  finally { idle(ui['receive-hosted-button'], 'Get encrypted package'); }
+}
 async function decryptSharedPackage() {
-  const packageFile = ui['encrypted-package-input'].files[0];
+  const packageFile = state.receivedHostedPackage || ui['encrypted-package-input'].files[0];
   const keyFile = ui['recovery-key-input'].files[0];
   if (!packageFile || !keyFile) { ui['decrypt-status'].textContent = 'Choose both the encrypted package and its recovery key.'; return; }
   busy(ui['decrypt-package-button'], 'Opening…');
