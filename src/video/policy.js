@@ -1,6 +1,6 @@
 import { clampNormalizedBox } from '../sanitize/redaction.js';
 
-const ACTIONS = new Set(['blur', 'cover']);
+const ACTIONS = new Set(['cover']);
 
 export function normalizeTrackedVideoBoxes({ duration, tracks = [] } = {}) {
   const boundedDuration = positiveNumber(duration);
@@ -32,6 +32,27 @@ export function buildVideoRedactionJobRequest(file, redactions = []) {
   };
 }
 
+export function getVideoReviewItems(findings = []) {
+  return findings.flatMap((finding) => {
+    const range = normalizeReviewRange(finding?.timeRange);
+    if (!finding?.boundingBox || !range || !finding.id) return [];
+    return [{
+      id: String(finding.id),
+      title: String(finding.title || 'Private detail'),
+      start: range.start,
+      end: range.end,
+      action: finding.redactionAction || 'keep',
+    }];
+  });
+}
+
+export function selectVideoFindingAction(findings = [], id, action) {
+  if (!['cover', 'keep'].includes(action)) return findings;
+  return findings.map((finding) => finding.id === id
+    ? { ...finding, redactionAction: action, resolved: false }
+    : finding);
+}
+
 export function createVideoProcessingReport({ processor } = {}) {
   const complete = processor?.state === 'complete' && processor?.output?.downloadUrl;
   if (complete) return { state: 'complete', cleanVideoProduced: true, message: 'A clean video is ready to save.' };
@@ -45,7 +66,17 @@ function normalizeTimeRange(range, duration) {
   const start = Number(range?.start ?? range?.startTime);
   const end = Number(range?.end ?? range?.endTime);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-  return { startTime: precise(Math.max(0, Math.min(duration, Math.min(start, end)))), endTime: precise(Math.max(0, Math.min(duration, Math.max(start, end)))) };
+  const startTime = precise(Math.max(0, Math.min(duration, Math.min(start, end))));
+  const endTime = precise(Math.max(0, Math.min(duration, Math.max(start, end))));
+  return endTime > startTime ? { startTime, endTime } : null;
+}
+
+function normalizeReviewRange(range) {
+  const start = Number(range?.start ?? range?.startTime);
+  const end = Number(range?.end ?? range?.endTime);
+  return Number.isFinite(start) && Number.isFinite(end) && end > start
+    ? { start: precise(start), end: precise(end) }
+    : null;
 }
 
 function positiveNumber(value) { return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null; }

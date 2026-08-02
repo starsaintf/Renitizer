@@ -3,19 +3,25 @@ import { clampNormalizedBox } from '../sanitize/redaction.js';
 
 const requiredFields = ['id', 'category', 'title', 'detail', 'severity', 'confidence'];
 
-export async function requestCloudAnalysis({ endpoint, file, files, analyses, consent }) {
+export async function requestCloudAnalysis({ endpoint, file, files, analyses, frameContext, consent }) {
   if (!consent) throw new Error('Cloud analysis requires explicit consent.');
   if (!endpoint) throw new Error('Enter a cloud analysis endpoint before sending a file.');
   const selectedFiles = files || (file ? [file] : []);
   if (!selectedFiles.length) throw new Error('Choose a file before requesting cloud analysis.');
 
-  const form = new FormData();
-  for (const selectedFile of selectedFiles) form.append('file', selectedFile, selectedFile.name);
-  form.append('analyses', JSON.stringify(analyses));
+  const form = buildCloudAnalysisForm({ files: selectedFiles, analyses, frameContext });
   const response = await fetch(endpoint, { method: 'POST', body: form, headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`Cloud analysis failed (${response.status}).`);
   const payload = await response.json();
   return normalizeCloudFindings(payload.findings);
+}
+
+export function buildCloudAnalysisForm({ files = [], analyses = [], frameContext } = {}) {
+  const form = new FormData();
+  for (const file of files) form.append('file', file, file.name);
+  form.append('analyses', JSON.stringify(analyses));
+  if (Array.isArray(frameContext) && frameContext.length === files.length) form.append('frameContext', JSON.stringify(frameContext));
+  return form;
 }
 
 export function normalizeCloudFindings(findings) {

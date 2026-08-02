@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   buildVideoRedactionJobRequest,
   createVideoProcessingReport,
+  getVideoReviewItems,
   normalizeTrackedVideoBoxes,
+  selectVideoFindingAction,
 } from '../src/video/policy.js';
 
 test('normalizes selected tracked video boxes into bounded time ranges', () => {
@@ -17,8 +19,31 @@ test('normalizes selected tracked video boxes into bounded time ranges', () => {
   });
 
   assert.deepEqual(plan, [
-    { id: 'plate', action: 'blur', startTime: 0, endTime: 12, box: { x: 0, y: 0.8, width: 0.3, height: 0.2 } },
     { id: 'face', action: 'cover', startTime: 4, endTime: 8, box: { x: 0.2, y: 0.1, width: 0.2, height: 0.3 } },
+  ]);
+});
+
+test('drops a selected video box when its time window falls wholly outside the video', () => {
+  assert.deepEqual(normalizeTrackedVideoBoxes({
+    duration: 12,
+    tracks: [{ id: 'expired', redactionAction: 'cover', boundingBox: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 }, timeRange: { start: -4, end: -1 } }],
+  }), []);
+});
+
+test('getVideoReviewItems exposes only boxed time-bounded moments', () => {
+  assert.deepEqual(getVideoReviewItems([
+    { id: 'plate', title: 'Vehicle plate', boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 }, timeRange: { start: 2, end: 4 }, redactionAction: 'cover' },
+    { id: 'landmark', title: 'Landmark', timeRange: { start: 5, end: 6 } },
+  ]), [
+    { id: 'plate', title: 'Vehicle plate', start: 2, end: 4, action: 'cover' },
+  ]);
+});
+
+test('selectVideoFindingAction keeps a cover choice pending until a rendered output exists', () => {
+  assert.deepEqual(selectVideoFindingAction([
+    { id: 'plate', redactionAction: 'keep', resolved: false },
+  ], 'plate', 'cover'), [
+    { id: 'plate', redactionAction: 'cover', resolved: false },
   ]);
 });
 

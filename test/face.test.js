@@ -37,7 +37,7 @@ test('includes the face scanner in Renitizer’s standard image check', async ()
 
   assert.match(app, /import \{ scanFaces \} from '\.\/scanners\/face\.js';/);
   assert.match(app, /\[scanFileFacts, scanMetadata, scanBarcodes, scanFaces\]/);
-  assert.match(app, /new Set\(\['metadata', 'barcodes', 'faces'\]\)/);
+  assert.match(app, /new Set\(isImage \? \['metadata', 'barcodes', 'faces'\] : \['metadata'\]\)/);
   assert.match(app, /faces: scanFaces/);
 });
 

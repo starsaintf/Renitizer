@@ -78,7 +78,8 @@ export function createWorker({ identityFetcher = fetch, processorFetcher = fetch
     const form = await request.formData();
     const files = form.getAll('file').filter((file) => file instanceof File);
     if (!files.length) return json({ error: 'At least one media file is required.' }, 400);
-    const findings = (await Promise.all(files.map((file) => analyzeMedia(file, env)))).flat();
+    const frameContexts = parseFrameContexts(form.get('frameContext'), files.length);
+    const findings = (await Promise.all(files.map((file, index) => analyzeMedia(file, env, frameContexts[index])))).flat();
     return json({ findings });
     },
     async queue(batch, env) {
@@ -448,14 +449,14 @@ async function requireRenvoyIdentity(request, env, fetcher) {
   return json({ error: { code: 'unauthorized', message: 'A valid Renvoy identity is required.' } }, 401);
 }
 
-async function analyzeMedia(file, env) {
+async function analyzeMedia(file, env, frameContext = null) {
   if (file.type.startsWith('audio/')) return transcribeAudio(file, env);
   if (file.type.startsWith('video/')) return [unavailable('cloud-video-frame-required', 'Send sampled image frames from the video to this vision endpoint, or configure a dedicated cloud video endpoint.')];
   if (!file.type.startsWith('image/')) return [unavailable('cloud-media-boundary', 'This endpoint accepts image files, audio transcription, or sampled video image frames.')];
-  return analyzeImage(file, env);
+  return analyzeImage(file, env, frameContext);
 }
 
-async function analyzeImage(file, env) {
+async function analyzeImage(file, env, frameContext = null) {
   const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
   const upstream = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -463,8 +464,35 @@ async function analyzeImage(file, env) {
   });
   if (!upstream.ok) return [unavailable('cloud-vision-failed', 'Vision provider request failed; local findings were retained.')];
   const response = await upstream.json();
-  try { return JSON.parse(response.output_text).findings || []; }
+  try { return attachFrameTiming(JSON.parse(response.output_text).findings || [], frameContext); }
   catch { return [unavailable('cloud-vision-unreadable', 'Vision provider returned an unreadable structured response.')]; }
+}
+
+export function parseFrameContexts(value, fileCount) {
+  const empty = Array.from({ length: Number.isSafeInteger(fileCount) && fileCount > 0 ? fileCount : 0 }, () => null);
+  if (typeof value !== 'string' || value.length > 4096) return empty;
+  let parsed;
+  try { parsed = JSON.parse(value); }
+  catch { return empty; }
+  if (!Array.isArray(parsed) || parsed.length !== empty.length) return empty;
+  return parsed.map((context) => {
+    const time = Number(context?.time);
+    const duration = Number(context?.duration);
+    return Number.isFinite(time) && Number.isFinite(duration) && duration > 0 && time >= 0 && time <= duration
+      ? { time, duration }
+      : null;
+  });
+}
+
+export function attachFrameTiming(findings, context) {
+  if (!Array.isArray(findings) || !context) return findings;
+  const time = Number(context.time);
+  const duration = Number(context.duration);
+  if (!Number.isFinite(time) || !Number.isFinite(duration) || duration <= 0 || time < 0 || time > duration) return findings;
+  const timeRange = { start: Math.max(0, time - 1), end: Math.min(duration, time + 1) };
+  return findings.map((finding) => finding?.boundingBox
+    ? { ...finding, timeRange, redactionAction: finding.redactionAction || 'keep' }
+    : finding);
 }
 
 export function buildImageVisionRequest(imageUrl) {

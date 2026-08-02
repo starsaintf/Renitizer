@@ -16,12 +16,13 @@ import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/c
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
 import { documentUiCopy } from './documents/presentation.js';
+import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
 import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, audio: { duration: null, manualRanges: [], processing: null } };
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 
@@ -55,6 +56,7 @@ function renderView() {
 
 async function selectFile(file) {
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+  state.previewUrl = null;
   state.file = file || null;
   state.cleanFile = null;
   state.findings = [];
@@ -68,10 +70,13 @@ async function selectFile(file) {
   state.documentRequest = null;
   state.documentReport = null;
   state.remoteDocument = null;
+  state.remoteVideo = null;
   state.audio = { duration: null, manualRanges: [], processing: null };
+  state.video = { duration: null, width: null, height: null };
   ui['file-summary'].textContent = file ? `${file.name} · ${formatBytes(file.size)}` : 'No file selected yet.';
   const isImage = Boolean(file?.type.startsWith('image/'));
   const isAudio = Boolean(file?.type.startsWith('audio/'));
+  const isVideo = Boolean(file?.type.startsWith('video/'));
   const documentType = documentTypeForFile(file);
   const isDocument = Boolean(documentType);
   if (isDocument) {
@@ -81,8 +86,8 @@ async function selectFile(file) {
   }
   ui['scan-button'].disabled = !file;
   ui['deep-scan-button'].disabled = !file;
-  ui['sanitize-button'].disabled = !isImage && !isDocument && !isAudio;
-  ui['sanitize-button'].textContent = isDocument ? documentUiCopy(documentType).actionLabel : isAudio ? 'Remove private audio' : 'Make a clean copy';
+  ui['sanitize-button'].disabled = !isImage && !isDocument && !isAudio && !isVideo || isVideo;
+  ui['sanitize-button'].textContent = isDocument ? documentUiCopy(documentType).actionLabel : isAudio ? 'Remove private audio' : isVideo ? 'Make a private clean video' : 'Make a clean copy';
   ui['download-button'].disabled = true;
   ui['report-button'].disabled = true;
   updateCloudButton();
@@ -98,6 +103,8 @@ async function selectFile(file) {
     ? 'Choose the spoken parts to mute or bleep. We will only say a clean copy exists after its WAV file is created.'
     : isImage
     ? 'For supported images, make a metadata-free copy and choose which marked areas to blur or cover.'
+    : isVideo
+    ? 'Use the optional extra check to find moments to cover. Your video is sent privately only after you choose cover and start the clean from Renvoy.'
     : 'This kind of file can be checked, but we cannot make a clean copy for it in this browser. You can still save a check summary in More checks.';
   render();
   if (isAudio) {
@@ -121,6 +128,20 @@ async function selectFile(file) {
       }
     }
   }
+  if (isVideo) {
+    const selectedFile = file;
+    try {
+      state.video = await inspectVideoFile(file);
+      if (state.file !== selectedFile) return;
+      ui['sanitize-button'].disabled = false;
+      renderVideoAdvanced();
+    } catch {
+      if (state.file !== selectedFile) return;
+      state.video = { duration: null, width: null, height: null };
+      ui['sanitize-button'].disabled = true;
+      ui['sanitize-note'].textContent = 'This video could not be opened in this browser. You can still save its check summary.';
+    }
+  }
 }
 
 async function localScan() {
@@ -131,8 +152,10 @@ async function localScan() {
       state.findings = [{ id: 'document-processor-unavailable', category: 'capability', title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured document-cleaning processor.', severity: 'low', confidence: 1, assessment: 'unavailable', resolved: false }];
       state.availableChecks = new Set();
     } else {
-      state.findings = await runScanners(state.file, [scanFileFacts, scanMetadata, scanBarcodes, scanFaces]);
-      state.availableChecks = new Set(['metadata', 'barcodes', 'faces']);
+      const isImage = state.file.type.startsWith('image/');
+      const localScanners = isImage ? [scanFileFacts, scanMetadata, scanBarcodes, scanFaces] : [scanFileFacts, scanMetadata];
+      state.findings = await runScanners(state.file, localScanners);
+      state.availableChecks = new Set(isImage ? ['metadata', 'barcodes', 'faces'] : ['metadata']);
     }
     invalidateCleanVerification();
     state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
@@ -154,6 +177,7 @@ async function deepScan() {
 async function cleanSelectedFile() {
   if (documentTypeForFile(state.file)) return prepareDocumentCleaningRequest();
   if (state.file?.type.startsWith('audio/')) return cleanAudio();
+  if (state.file?.type.startsWith('video/')) return cleanVideo();
   return cleanImage();
 }
 
@@ -237,6 +261,54 @@ async function prepareDocumentCleaningRequest() {
   } finally { idle(ui['sanitize-button'], copy.actionLabel); }
 }
 
+async function cleanVideo() {
+  if (!state.file || !state.video.duration) return;
+  const tracks = normalizeTrackedVideoBoxes({ duration: state.video.duration, tracks: state.findings });
+  if (!tracks.length) {
+    ui['sanitize-note'].textContent = 'Run an extra video check, then choose cover for at least one marked moment.';
+    return;
+  }
+  busy(ui['sanitize-button'], 'Starting private video clean…');
+  try {
+    const session = await requestRenvoySession();
+    if (!session.available) {
+      ui['clean-status'].textContent = 'Open Renitizer from Renvoy to make a private clean video.';
+      ui['sanitize-note'].textContent = 'Renvoy safely connects your covered moments to the private video processor.';
+      return;
+    }
+    const queued = await submitRemoteJob({ session, file: state.file, metadata: buildVideoRedactionJobRequest(state.file, tracks) });
+    state.remoteVideo = { session, jobId: queued.job?.id ?? null, trackIds: tracks.map((track) => track.id) };
+    state.cleanFile = null;
+    state.receiptReady = true;
+    ui['download-button'].disabled = true;
+    ui['clean-status'].textContent = 'Your private clean video is being prepared.';
+    ui['sanitize-note'].textContent = 'We will only say your video is ready after the private processor returns the new MP4.';
+    updateReport();
+    if (state.remoteVideo.jobId) setTimeout(() => { void refreshRemoteVideo(); }, 1500);
+  } catch {
+    ui['clean-status'].textContent = 'The private video clean could not start. Your original was not changed.';
+    ui['sanitize-note'].textContent = 'Try again from Renvoy when your private connection is available.';
+  } finally { idle(ui['sanitize-button'], 'Make a private clean video'); }
+}
+
+async function refreshRemoteVideo() {
+  if (!state.remoteVideo?.jobId) return;
+  try {
+    const status = await getRemoteJob(state.remoteVideo);
+    if (status.job?.state === 'complete') {
+      const covered = new Set(state.remoteVideo.trackIds || []);
+      state.findings = state.findings.map((finding) => covered.has(finding.id) ? { ...finding, resolved: true } : finding);
+      state.remoteVideo = { ...state.remoteVideo, ready: true };
+      ui['download-button'].disabled = false;
+      ui['clean-status'].textContent = 'Your private clean video is ready to save.';
+      ui['sanitize-note'].textContent = 'Your covered MP4 is ready in Renvoy.';
+      updateReport();
+    } else if (status.job?.state === 'failed') {
+      ui['clean-status'].textContent = 'The private video clean could not finish. Your original was not changed.';
+    } else setTimeout(() => { void refreshRemoteVideo(); }, 2500);
+  } catch { ui['clean-status'].textContent = 'We could not check the private video clean yet. It may still be working.'; }
+}
+
 async function refreshRemoteDocument() {
   if (!state.remoteDocument?.jobId) return;
   try {
@@ -257,8 +329,9 @@ async function cloudScan() {
   busy(ui['cloud-button'], 'Sending…');
   ui['cloud-status'].textContent = 'Sending your selected file to the service you chose…';
   try {
-    const cloudFiles = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : [state.file];
-    const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], consent: ui['cloud-consent'].checked });
+    const frameSamples = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : null;
+    const cloudFiles = frameSamples ? frameSamples.map((sample) => sample.file) : [state.file];
+    const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], frameContext: frameSamples?.map(({ time, duration }) => ({ time, duration })), consent: ui['cloud-consent'].checked });
     state.findings = [...state.findings, ...cloudFindings];
     invalidateCleanVerification();
     state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
@@ -269,9 +342,10 @@ async function cloudScan() {
 }
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
-function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderAudioAdvanced(); renderShareSection(); }
+function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderAudioAdvanced(); renderVideoAdvanced(); renderShareSection(); }
 
 function render() {
+  const isImage = state.file?.type.startsWith('image/');
   ui.findings.replaceChildren();
   if (!state.findings.length) {
     const empty = document.createElement('p');
@@ -286,7 +360,7 @@ function render() {
     element.querySelector('strong').textContent = friendly.title;
     element.querySelector('p').textContent = friendly.detail;
     element.querySelector('small').textContent = `${finding.resolved ? 'addressed in clean copy' : 'may need your attention'}`;
-    if (finding.boundingBox) {
+    if (isImage && finding.boundingBox) {
       const controls = document.createElement('div');
       controls.className = 'finding-actions';
       for (const action of ['blur', 'cover', 'keep']) {
@@ -304,6 +378,17 @@ function render() {
         const button = document.createElement('button');
         button.className = 'text-button'; button.type = 'button'; button.textContent = action;
         button.addEventListener('click', () => { state.findings = selectAudioFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });
+        controls.append(button);
+      }
+      element.querySelector('div').append(controls);
+    }
+    if (state.file?.type.startsWith('video/') && finding.boundingBox && finding.timeRange) {
+      const controls = document.createElement('div');
+      controls.className = 'finding-actions';
+      for (const action of ['cover', 'keep']) {
+        const button = document.createElement('button');
+        button.className = 'text-button'; button.type = 'button'; button.textContent = action;
+        button.addEventListener('click', () => { state.findings = selectVideoFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });
         controls.append(button);
       }
       element.querySelector('div').append(controls);
@@ -400,6 +485,37 @@ function renderAudioAdvanced() {
   }
 }
 
+function renderVideoAdvanced() {
+  const isVideo = state.file?.type.startsWith('video/');
+  ui['video-advanced'].hidden = !isVideo;
+  if (!isVideo) return;
+  if (!state.previewUrl) state.previewUrl = URL.createObjectURL(state.file);
+  ui['video-preview'].replaceChildren();
+  const preview = document.createElement('video');
+  preview.src = state.previewUrl; preview.controls = true; preview.playsInline = true; preview.preload = 'metadata';
+  preview.setAttribute('aria-label', 'Selected video preview');
+  ui['video-preview'].append(preview);
+  ui['video-track-list'].replaceChildren();
+  const items = getVideoReviewItems(state.findings);
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'microcopy';
+    empty.textContent = 'Run the optional extra check to find visible details in sampled moments. You choose what to cover before the video is sent for cleaning.';
+    ui['video-track-list'].append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'video-track-item';
+    const label = document.createElement('span');
+    label.textContent = `${item.title} · ${formatTime(item.start)}–${formatTime(item.end)}`;
+    const action = document.createElement('span');
+    action.textContent = item.action;
+    row.append(label, action);
+    ui['video-track-list'].append(row);
+  }
+}
+
 function addManualAudioRange() {
   const start = Number(ui['audio-range-start'].value);
   const end = Number(ui['audio-range-end'].value);
@@ -472,6 +588,13 @@ function friendlyFinding(finding) {
 }
 
 async function downloadCleanCopy() {
+  if (state.remoteVideo?.ready) {
+    try {
+      const blob = await downloadRemoteJob(state.remoteVideo);
+      download(blob, 'renitized-video.mp4', 'video/mp4');
+    } catch { ui['sanitize-note'].textContent = 'We could not save the private clean video. Please try again.'; }
+    return;
+  }
   if (state.remoteDocument?.ready) {
     try {
       const blob = await downloadRemoteJob(state.remoteDocument);
@@ -584,9 +707,20 @@ async function extractVideoFrames(file) {
       if (index > 0) { video.currentTime = time; await waitFor(video, 'seeked'); }
       canvas.getContext('2d').drawImage(video, 0, 0);
       const blob = await new Promise((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Video unavailable')), 'image/jpeg', 0.85));
-      frames.push(new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-frame-${frames.length + 1}.jpg`, { type: 'image/jpeg' }));
+          frames.push({ file: new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-frame-${frames.length + 1}.jpg`, { type: 'image/jpeg' }), time, duration: video.duration });
     }
     return frames;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function inspectVideoFile(file) {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.src = url; video.muted = true; video.playsInline = true;
+  try {
+    await waitFor(video, 'loadedmetadata');
+    if (!video.videoWidth || !video.videoHeight || !Number.isFinite(video.duration) || video.duration <= 0) throw new Error('Video unavailable');
+    return { duration: video.duration, width: video.videoWidth, height: video.videoHeight };
   } finally { URL.revokeObjectURL(url); }
 }
 
