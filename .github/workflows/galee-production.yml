@@ -52,8 +52,8 @@ jobs:
           context: ./processor/${{ matrix.processor }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/renitizer-${{ matrix.processor }}:latest
-            ghcr.io/${{ github.repository_owner }}/renitizer-${{ matrix.processor }}:${{ github.sha }}
+            ghcr.io/galee-labs/renitizer-${{ matrix.processor }}:latest
+            ghcr.io/galee-labs/renitizer-${{ matrix.processor }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=Renitizer private ${{ matrix.processor }} processor

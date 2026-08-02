@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   verify:
+    if: github.repository_owner == 'starsaintf'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,6 +31,7 @@ jobs:
           node --test test/*.test.js worker/test/*.test.js processor/video/test/filter.test.mjs processor/document/test_contract.mjs
 
   deploy-worker:
+    if: github.repository_owner == 'starsaintf'
     needs: verify
     runs-on: ubuntu-latest
     environment: production
@@ -58,6 +60,7 @@ jobs:
           fi
 
   pages:
+    if: github.repository_owner == 'starsaintf'
     needs: verify
     runs-on: ubuntu-latest
     environment:
