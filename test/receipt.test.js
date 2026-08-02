@@ -31,6 +31,16 @@ test('records verification checks and document processor status as not checked',
   assert.equal(receipt.summary, 'No changes made · 2 checks not available');
 });
 
+test('uses a plain-language name when a face re-check is unavailable', () => {
+  const receipt = createReceipt({
+    findings: [],
+    report: { counts: { total: 0, resolved: 0, unresolved: 0 } },
+    verification: { checks: { faces: { status: 'not-assessed', reason: 'Faces could not be checked again on the clean copy.' } } },
+  });
+
+  assert.deepEqual(receipt.notChecked, ['Faces: Faces could not be checked again on the clean copy.']);
+});
+
 test('keeps an informational resolved finding out of the kept list', () => {
   const receipt = createReceipt({
     findings: [{ id: 'file-facts', title: 'File inspected', resolved: true }],

@@ -13,6 +13,10 @@ const localChecks = {
     label: 'Barcodes',
     matches: (finding) => /^(barcode-|verify-barcode)/.test(finding.id || '') || ['barcode', 'qr'].includes(finding.category),
   },
+  faces: {
+    label: 'Faces',
+    matches: (finding) => /^(face-|verify-faces-)/.test(finding.id || '') || finding.category === 'face',
+  },
 };
 
 export function boundedSafetyScore(residualRisks = []) {
@@ -28,7 +32,8 @@ export function deriveResidualRisks({ beforeFindings = [], afterFindings = [], a
   for (const finding of beforeFindings.filter((item) => !item.resolved)) {
     const localCheck = localCheckFor(finding);
     const needsVisualRedaction = Boolean(finding.boundingBox) && !addressedBoxes.has(finding.id);
-    if (needsVisualRedaction || !localCheck || !assessed.has(localCheck)) residual.push(finding);
+    const appliedVisualRedaction = Boolean(finding.boundingBox) && addressedBoxes.has(finding.id);
+    if (needsVisualRedaction || (!appliedVisualRedaction && (!localCheck || !assessed.has(localCheck)))) residual.push(finding);
   }
 
   return uniqueByIdentity(residual);
@@ -46,6 +51,7 @@ export function createVerification({
     metadata: localCheckResult('metadata', afterFindings, assessedChecks),
     visibleText: localCheckResult('visibleText', afterFindings, assessedChecks),
     barcodes: localCheckResult('barcodes', afterFindings, assessedChecks),
+    faces: localCheckResult('faces', afterFindings, assessedChecks),
     visualRedactions: visualRedactionResult(beforeFindings, redactionPlan),
     cloud: providerCheckResult('cloud', providerResults.cloud, afterFindings),
     faceLandmarks: providerCheckResult('faceLandmarks', providerResults.faceLandmarks, afterFindings),

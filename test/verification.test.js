@@ -46,6 +46,43 @@ test('createVerification reports ready only after available clean-copy checks pa
   assert.equal(verification.checks.barcodes.status, 'passed');
 });
 
+test('createVerification accepts a passed local face re-check after an approved visual redaction', () => {
+  const face = finding({
+    id: 'face-1', category: 'face', boundingBox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+  });
+
+  const verification = createVerification({
+    beforeFindings: [face],
+    afterFindings: [],
+    assessedChecks: ['faces'],
+    redactionPlan: [{ id: 'face-1', action: 'blur' }],
+  });
+
+  assert.equal(verification.readiness.state, 'ready');
+  assert.deepEqual(verification.residualRisks, []);
+  assert.deepEqual(verification.checks.faces, {
+    status: 'passed',
+    reason: 'Faces check found no remaining items in the clean copy.',
+  });
+});
+
+test('createVerification accepts an approved cover for a marked cloud clue without a matching local detector', () => {
+  const landmark = finding({
+    id: 'cloud-landmark-1', category: 'landmark', source: 'cloud',
+    boundingBox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+  });
+
+  const verification = createVerification({
+    beforeFindings: [landmark],
+    afterFindings: [],
+    redactionPlan: [{ id: 'cloud-landmark-1', action: 'cover' }],
+  });
+
+  assert.equal(verification.readiness.state, 'ready');
+  assert.deepEqual(verification.residualRisks, []);
+  assert.equal(verification.checks.visualRedactions.status, 'passed');
+});
+
 test('createVerification requests review for post-clean risks and skipped visual redactions', () => {
   const afterText = finding({ id: 'ocr-email', category: 'email', severity: 'medium' });
   const plannedBox = finding({ id: 'barcode-1', category: 'barcode', boundingBox: { x: 0, y: 0, width: .2, height: .2 } });

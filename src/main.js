@@ -6,13 +6,13 @@ import { scanOcr } from './scanners/ocr.js';
 import { requestCloudAnalysis } from './scanners/cloud.js';
 import { runScanners } from './scanners/orchestrator.js';
 import { sanitizeRasterImage } from './sanitize/image.js';
-import { resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
+import { markRedactionsResolved, resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
 import { getAudioProcessingState, getAudioReviewItems, inspectAudioFile, resolveAudioRedactionPlan, sanitizeAudioFile, selectAudioFindingAction } from './sanitize/audio.js';
 import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
 import { getViewFromHash } from './core/view-state.js';
-import { friendlyFinding } from './core/friendly-findings.js';
+import { findingStatus, friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
@@ -39,7 +39,7 @@ ui['report-button'].addEventListener('click', downloadReport);
 ui['cloud-button'].addEventListener('click', cloudScan);
 ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
-ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: true } : finding); invalidateCleanVerification(); updateReport(); });
+ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: false } : finding); invalidateCleanVerification(); updateReport(); });
 ui['add-audio-range-button']?.addEventListener('click', addManualAudioRange);
 ui['share-expiry'].addEventListener('change', resetSharePackage);
 ui['share-detailed-findings'].addEventListener('change', resetSharePackage);
@@ -226,7 +226,7 @@ async function cleanImage() {
     const redactionPlan = resolveRedactionPlan(beforeFindings);
     state.cleanFile = await sanitizeRasterImage(state.file, redactionPlan);
     state.share = null;
-    state.findings = state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding);
+    state.findings = markRedactionsResolved(state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding), redactionPlan);
     const postClean = await rerunCleanScanners(state.cleanFile, state.availableChecks);
     state.verification = createVerification({ beforeFindings, afterFindings: postClean.findings, assessedChecks: postClean.assessedChecks, redactionPlan });
     ui['clean-status'].textContent = state.verification.readiness.label;
@@ -370,7 +370,7 @@ function render() {
     element.classList.add(finding.severity);
     element.querySelector('strong').textContent = friendly.title;
     element.querySelector('p').textContent = friendly.detail;
-    element.querySelector('small').textContent = `${finding.resolved ? 'addressed in clean copy' : 'may need your attention'}`;
+    element.querySelector('small').textContent = findingStatus(finding);
     if (isImage && finding.boundingBox) {
       const controls = document.createElement('div');
       controls.className = 'finding-actions';
@@ -442,7 +442,7 @@ function renderReceipt() {
 }
 
 function friendlyCheckName(check) {
-  return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment', faceLandmarks: 'Face and landmarks', reverseImage: 'Reverse-image / OSINT' })[check] || check;
+  return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', faces: 'Faces', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment', faceLandmarks: 'Face and landmarks', reverseImage: 'Reverse-image / OSINT' })[check] || check;
 }
 
 function invalidateCleanVerification() {
@@ -550,7 +550,7 @@ function formatTime(value) {
 
 function addRedactionBox() {
   const id = `manual-redaction-${Date.now()}`;
-  state.findings = [...state.findings, { id, category: 'identity', title: 'Manual redaction area', detail: 'An area you marked for review.', severity: 'medium', confidence: 1, assessment: 'assessed', resolved: true, redactionAction: 'blur', boundingBox: { x: 0.35, y: 0.35, width: 0.3, height: 0.18 } }];
+  state.findings = [...state.findings, { id, category: 'identity', title: 'Manual redaction area', detail: 'An area you marked for review.', severity: 'medium', confidence: 1, assessment: 'assessed', resolved: false, redactionAction: 'blur', boundingBox: { x: 0.35, y: 0.35, width: 0.3, height: 0.18 } }];
   invalidateCleanVerification();
   updateReport();
 }

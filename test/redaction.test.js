@@ -5,6 +5,7 @@ import {
   scaleNormalizedBox,
   resolveRedactionPlan,
   setFindingAction,
+  markRedactionsResolved,
 } from '../src/sanitize/redaction.js';
 
 test('clampNormalizedBox keeps a partially out-of-frame box inside the image', () => {
@@ -39,18 +40,30 @@ test('resolveRedactionPlan includes only selected visual fixes', () => {
   ]);
 });
 
-test('setFindingAction marks a visual fix as addressed while keeping an opted-out finding open', () => {
+test('setFindingAction records a visual choice without claiming the image has already changed', () => {
   const findings = [
     { id: 'one', resolved: false },
     { id: 'two', resolved: false },
   ];
 
   assert.deepEqual(setFindingAction(findings, 'one', 'cover'), [
-    { id: 'one', resolved: true, redactionAction: 'cover' },
+    { id: 'one', resolved: false, redactionAction: 'cover' },
     { id: 'two', resolved: false },
   ]);
   assert.deepEqual(setFindingAction(findings, 'two', 'keep'), [
     { id: 'one', resolved: false },
+    { id: 'two', resolved: false, redactionAction: 'keep' },
+  ]);
+});
+
+test('markRedactionsResolved only resolves the visual fixes written into a clean image', () => {
+  const findings = [
+    { id: 'one', resolved: false, redactionAction: 'blur' },
+    { id: 'two', resolved: false, redactionAction: 'keep' },
+  ];
+
+  assert.deepEqual(markRedactionsResolved(findings, [{ id: 'one', action: 'blur' }]), [
+    { id: 'one', resolved: true, redactionAction: 'blur' },
     { id: 'two', resolved: false, redactionAction: 'keep' },
   ]);
 });

@@ -27,3 +27,9 @@ export function friendlyFinding(finding = {}) {
   if (id === 'file-facts') return { title: 'Your file was checked', detail: 'We looked at the file and the details that can travel with it.' };
   return { title: 'A private detail may need your attention', detail: 'This extra check found something worth reviewing before you share.' };
 }
+
+export function findingStatus(finding = {}) {
+  if (finding.resolved) return 'addressed in clean copy';
+  const planned = { blur: 'blurred', cover: 'covered', mute: 'muted', bleep: 'bleeped', remove: 'removed' };
+  return planned[finding.redactionAction] ? `will be ${planned[finding.redactionAction]} in your clean copy` : 'may need your attention';
+}

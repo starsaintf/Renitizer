@@ -44,7 +44,7 @@ export function createReceipt({ findings = [], report = {}, verification = null,
 }
 
 function findingLabel(finding) { return String(finding?.title || finding?.detail || 'A private detail').trim(); }
-function friendlyCheckName(check) { return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment' })[check] || check; }
+function friendlyCheckName(check) { return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', faces: 'Faces', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment' })[check] || check; }
 function makeSummary(changed, kept, notChecked) {
   const parts = [
     changed ? `${changed} change${changed === 1 ? '' : 's'} made` : 'No changes made',

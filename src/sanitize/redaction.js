@@ -21,8 +21,13 @@ export function resolveRedactionPlan(findings = []) {
 
 export function setFindingAction(findings, id, action) {
   return findings.map((finding) => finding.id === id
-    ? { ...finding, redactionAction: action, resolved: action !== 'keep' }
+    ? { ...finding, redactionAction: action, resolved: false }
     : finding);
+}
+
+export function markRedactionsResolved(findings = [], plan = []) {
+  const applied = new Set(plan.filter((item) => ACTIONS.has(item.action)).map((item) => item.id));
+  return findings.map((finding) => applied.has(finding.id) ? { ...finding, resolved: true } : finding);
 }
 
 export function normalizePixelBox(box, width, height) {

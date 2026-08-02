@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { friendlyFinding } from '../src/core/friendly-findings.js';
+import { findingStatus, friendlyFinding } from '../src/core/friendly-findings.js';
 
 test('explains a cloud location clue in plain language', () => {
   assert.deepEqual(friendlyFinding({ id: 'cloud-landmark', category: 'landmark' }), {
@@ -21,4 +21,11 @@ test('explains a cloud screen without exposing technical categories', () => {
     title: 'A screen may show private information',
     detail: 'Review it before you share this image.',
   });
+});
+
+test('shows whether an image redaction is planned or has been applied', () => {
+  assert.equal(findingStatus({ redactionAction: 'blur', resolved: false }), 'will be blurred in your clean copy');
+  assert.equal(findingStatus({ redactionAction: 'cover', resolved: false }), 'will be covered in your clean copy');
+  assert.equal(findingStatus({ redactionAction: 'blur', resolved: true }), 'addressed in clean copy');
+  assert.equal(findingStatus({ redactionAction: 'keep', resolved: false }), 'may need your attention');
 });
