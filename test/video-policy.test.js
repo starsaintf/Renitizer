@@ -40,6 +40,14 @@ test('getVideoReviewItems exposes only boxed time-bounded moments', () => {
   ]);
 });
 
+test('getVideoReviewItems tells the workspace when a review item was seen across multiple checked moments', () => {
+  assert.deepEqual(getVideoReviewItems([
+    { id: 'plate', title: 'Vehicle plate', boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 }, timeRange: { start: 2, end: 6 }, redactionAction: 'blur', trackedSamples: 3 },
+  ]), [
+    { id: 'plate', title: 'Vehicle plate', start: 2, end: 6, action: 'blur', sampledMoments: 3 },
+  ]);
+});
+
 test('selectVideoFindingAction keeps a blur choice pending until a rendered output exists', () => {
   assert.deepEqual(selectVideoFindingAction([
     { id: 'plate', redactionAction: 'keep', resolved: false },

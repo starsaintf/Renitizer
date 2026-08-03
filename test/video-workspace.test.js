@@ -13,6 +13,8 @@ test('the workspace preserves sampled-video timing when requesting cloud analysi
   assert.match(app, /const times = buildVideoSampleTimes\(video\.duration\);/);
   assert.match(app, /return frames;/);
   assert.match(app, /time, duration/);
+  assert.match(app, /linkSampledVideoFindings/);
+  assert.match(app, /sampleTimes: frameSamples\.map\(\(\{ time \}\) => time\)/);
   assert.match(page, /id="video-advanced"/);
   assert.match(page, /id="video-track-list"/);
   assert.match(app, /function cleanVideo\(/);

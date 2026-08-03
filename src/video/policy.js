@@ -36,12 +36,16 @@ export function getVideoReviewItems(findings = []) {
   return findings.flatMap((finding) => {
     const range = normalizeReviewRange(finding?.timeRange);
     if (!finding?.boundingBox || !range || !finding.id) return [];
+    const sampledMoments = Number.isSafeInteger(Number(finding.trackedSamples)) && Number(finding.trackedSamples) > 1
+      ? Number(finding.trackedSamples)
+      : null;
     return [{
       id: String(finding.id),
       title: String(finding.title || 'Private detail'),
       start: range.start,
       end: range.end,
       action: finding.redactionAction || 'keep',
+      ...(sampledMoments ? { sampledMoments } : {}),
     }];
   });
 }

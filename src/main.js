@@ -21,6 +21,7 @@ import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createD
 import { documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
 import { buildVideoSampleTimes } from './video/sampling.js';
+import { linkSampledVideoFindings } from './video/tracking.js';
 import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
@@ -347,10 +348,13 @@ async function cloudScan() {
     const frameSamples = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : null;
     const cloudFiles = frameSamples ? frameSamples.map((sample) => sample.file) : [state.file];
     const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], frameContext: frameSamples?.map(({ time, duration }) => ({ time, duration })), consent: ui['cloud-consent'].checked });
-    state.findings = [...state.findings, ...cloudFindings];
+    const findingsForReview = frameSamples
+      ? linkSampledVideoFindings(cloudFindings, { sampleTimes: frameSamples.map(({ time }) => time), duration: state.video.duration })
+      : cloudFindings;
+    state.findings = [...state.findings, ...findingsForReview];
     invalidateCleanVerification();
     state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
-    ui['cloud-status'].textContent = `Your extra check returned ${cloudFindings.length} item${cloudFindings.length === 1 ? '' : 's'}.`;
+    ui['cloud-status'].textContent = `Your extra check returned ${findingsForReview.length} item${findingsForReview.length === 1 ? '' : 's'}.`;
     updateReport();
   } catch (error) { ui['cloud-status'].textContent = 'That extra check could not finish. Check the service address and try again.'; }
   finally { idle(ui['cloud-button'], 'Send for an extra check'); }
@@ -523,7 +527,8 @@ function renderVideoAdvanced() {
     const row = document.createElement('div');
     row.className = 'video-track-item';
     const label = document.createElement('span');
-    label.textContent = `${item.title} · ${formatTime(item.start)}–${formatTime(item.end)}`;
+    const sightings = item.sampledMoments ? ` · seen in ${item.sampledMoments} checked moments` : '';
+    label.textContent = `${item.title} · ${formatTime(item.start)}–${formatTime(item.end)}${sightings}`;
     const action = document.createElement('span');
     action.textContent = item.action;
     row.append(label, action);
