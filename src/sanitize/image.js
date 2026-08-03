@@ -1,15 +1,31 @@
-import { scaleNormalizedBox } from './redaction.js';
+import { reframeNormalizedBox, resolveCropBounds, scaleNormalizedBox } from './redaction.js';
 
 export async function sanitizeRasterImage(file, redactionPlan = []) {
   if (!file?.type?.startsWith('image/')) throw new Error('Canvas re-encoding supports raster image files only.');
   const bitmap = await createImageBitmap(file);
   try {
+    const cropBounds = resolveCropBounds(redactionPlan);
+    if (!cropBounds) throw new Error('The selected crop would remove the whole picture. Choose blur or cover instead.');
     const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
+    canvas.width = Math.max(1, Math.round(bitmap.width * cropBounds.width));
+    canvas.height = Math.max(1, Math.round(bitmap.height * cropBounds.height));
     const context = canvas.getContext('2d', { alpha: file.type === 'image/png' });
-    context.drawImage(bitmap, 0, 0);
-    for (const item of redactionPlan) applyRedaction(context, scaleNormalizedBox(item.box, canvas.width, canvas.height), item.action);
+    context.drawImage(
+      bitmap,
+      Math.round(bitmap.width * cropBounds.x),
+      Math.round(bitmap.height * cropBounds.y),
+      Math.round(bitmap.width * cropBounds.width),
+      Math.round(bitmap.height * cropBounds.height),
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+    for (const item of redactionPlan) {
+      if (item.action === 'crop') continue;
+      const reframed = reframeNormalizedBox(item.box, cropBounds);
+      if (reframed) applyRedaction(context, scaleNormalizedBox(reframed, canvas.width, canvas.height), item.action);
+    }
     const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('The browser could not encode a clean image.')), outputType, 0.92));
     const name = file.name.replace(/\.[^.]+$/, '') + '-renitized.' + (outputType === 'image/png' ? 'png' : 'jpg');

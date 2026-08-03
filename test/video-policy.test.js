@@ -48,6 +48,11 @@ test('selectVideoFindingAction keeps a blur choice pending until a rendered outp
   ]);
 });
 
+test('selectVideoFindingAction refuses a still-image-only crop choice', () => {
+  const findings = [{ id: 'plate', redactionAction: 'keep', resolved: false }];
+  assert.strictEqual(selectVideoFindingAction(findings, 'plate', 'crop'), findings);
+});
+
 test('builds a metadata-only video redaction request without raw pixels', () => {
   const request = buildVideoRedactionJobRequest({ name: 'street.mp4', type: 'video/mp4', size: 2048 }, [
     { id: 'plate', action: 'cover', startTime: 1.25, endTime: 3.5, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } },

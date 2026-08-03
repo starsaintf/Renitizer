@@ -26,7 +26,7 @@ export function boundedSafetyScore(residualRisks = []) {
 
 export function deriveResidualRisks({ beforeFindings = [], afterFindings = [], assessedChecks = [], redactionPlan = [] } = {}) {
   const assessed = new Set(assessedChecks);
-  const addressedBoxes = new Set(redactionPlan.filter((item) => ['blur', 'cover'].includes(item.action)).map((item) => item.id));
+  const addressedBoxes = new Set(redactionPlan.filter((item) => ['blur', 'cover', 'crop'].includes(item.action)).map((item) => item.id));
   const residual = afterFindings.filter((finding) => !finding.resolved);
 
   for (const finding of beforeFindings.filter((item) => !item.resolved)) {
@@ -82,10 +82,10 @@ function localCheckResult(key, afterFindings, assessedChecks) {
 }
 
 function visualRedactionResult(beforeFindings, redactionPlan) {
-  const selected = new Set(redactionPlan.filter((item) => ['blur', 'cover'].includes(item.action)).map((item) => item.id));
+  const selected = new Set(redactionPlan.filter((item) => ['blur', 'cover', 'crop'].includes(item.action)).map((item) => item.id));
   const skipped = beforeFindings.filter((finding) => !finding.resolved && finding.boundingBox && !selected.has(finding.id));
-  if (skipped.length) return { status: 'review-needed', reason: `${skipped.length} marked visible item${skipped.length === 1 ? '' : 's'} was not selected for blur or cover.` };
-  return { status: 'passed', reason: 'All marked visible items were selected for blur or cover.' };
+  if (skipped.length) return { status: 'review-needed', reason: `${skipped.length} marked visible item${skipped.length === 1 ? '' : 's'} was not selected for blur, cover, or crop.` };
+  return { status: 'passed', reason: 'All marked visible items were selected for blur, cover, or crop.' };
 }
 
 function providerCheckResult(key, provided, afterFindings) {

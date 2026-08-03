@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildVideoFilterGraph } from '../filter.mjs';
 
+test('FFmpeg blur graph changes rendered video pixels', {
+  skip: process.env.RENITIZER_FFMPEG_SMOKE === '1' ? false : 'Requires the FFmpeg-enabled processor container.',
+}, async () => {
 const directory = await mkdtemp(join(tmpdir(), 'renitizer-video-smoke-'));
 const input = join(directory, 'input.mp4');
 const baseline = join(directory, 'baseline.mp4');
@@ -32,6 +36,7 @@ try {
 } finally {
   await rm(directory, { recursive: true, force: true });
 }
+});
 
 async function render(source, destination, graph) {
   await execute('ffmpeg', [

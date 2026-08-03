@@ -26,7 +26,7 @@ jobs:
       - name: Build and run FFmpeg video-redaction smoke test
         run: |
           docker build --tag renitizer-video-smoke ./processor/video
-          docker run --rm --entrypoint node --volume "$GITHUB_WORKSPACE/processor/video:/tests:ro" renitizer-video-smoke /tests/test/ffmpeg-smoke.mjs
+          docker run --rm -e RENITIZER_FFMPEG_SMOKE=1 --entrypoint node --volume "$GITHUB_WORKSPACE/processor/video:/tests:ro" renitizer-video-smoke /tests/test/ffmpeg-smoke.mjs
       - name: Verify browser, Worker, and processor sources
         run: |
           node --check src/main.js

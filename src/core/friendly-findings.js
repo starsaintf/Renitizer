@@ -14,7 +14,7 @@ export function friendlyFinding(finding = {}) {
   if (id.includes('gps')) return { title: 'Location details found', detail: 'This file may include where it was made.' };
   if (id.includes('metadata') || id.includes('verify-')) return { title: 'File details found', detail: finding.resolved ? 'These details were removed from your clean copy.' : 'This file may include details added by a device or app.' };
   if (id.includes('barcode') || category === 'barcode' || category === 'qr') return { title: 'A scannable code was found', detail: 'A code in the image may share information when scanned.' };
-  if (id.startsWith('face-') || category === 'face') return { title: 'A face was found', detail: 'You can blur, cover, or keep it before you share.' };
+  if (id.startsWith('face-') || category === 'face') return { title: 'A face was found', detail: 'You can blur, cover, crop it out, or keep it before you share.' };
   if (id.includes('ocr-email') || category === 'email') return { title: 'An email address was found', detail: 'Writing in this image may include an email address.' };
   if (id.includes('ocr-phone') || category === 'phone') return { title: 'A phone number was found', detail: 'Writing in this image may include a phone number.' };
   if (id.includes('ocr-visual-address') || category === 'address') return { title: 'An address may be visible', detail: 'Writing in this image may include part of an address.' };
@@ -30,6 +30,6 @@ export function friendlyFinding(finding = {}) {
 
 export function findingStatus(finding = {}) {
   if (finding.resolved) return 'addressed in clean copy';
-  const planned = { blur: 'blurred', cover: 'covered', mute: 'muted', bleep: 'bleeped', remove: 'removed' };
+  const planned = { blur: 'blurred', cover: 'covered', crop: 'cropped out', mute: 'muted', bleep: 'bleeped', remove: 'removed' };
   return planned[finding.redactionAction] ? `will be ${planned[finding.redactionAction]} in your clean copy` : 'may need your attention';
 }

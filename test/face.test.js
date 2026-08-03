@@ -45,6 +45,6 @@ test('includes the face scanner in Renitizer’s standard image check', async ()
 test('uses plain language for a detected face in the app', () => {
   assert.deepEqual(friendlyFinding({ id: 'face-1', category: 'face' }), {
     title: 'A face was found',
-    detail: 'You can blur, cover, or keep it before you share.',
+    detail: 'You can blur, cover, crop it out, or keep it before you share.',
   });
 });

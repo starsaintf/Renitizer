@@ -6,7 +6,7 @@ import { scanOcr } from './scanners/ocr.js';
 import { requestCloudAnalysis } from './scanners/cloud.js';
 import { runScanners } from './scanners/orchestrator.js';
 import { sanitizeRasterImage } from './sanitize/image.js';
-import { markRedactionsResolved, resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
+import { markRedactionsResolved, resolveCropBounds, resolveRedactionPlan, setFindingAction } from './sanitize/redaction.js';
 import { getAudioProcessingState, getAudioReviewItems, inspectAudioFile, resolveAudioRedactionPlan, sanitizeAudioFile, selectAudioFindingAction } from './sanitize/audio.js';
 import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
@@ -113,7 +113,7 @@ async function selectFile(file) {
     : isAudio
     ? 'Choose the spoken parts to mute or bleep. We will only say a clean copy exists after its WAV file is created.'
     : isImage
-    ? 'For supported images, make a metadata-free copy and choose which marked areas to blur or cover.'
+    ? 'For supported images, make a clean copy and choose which marked areas to blur, cover, or crop out.'
     : isVideo
     ? 'Use the optional extra check to find moments to protect. Your video is sent privately only after you choose blur or cover and start the clean from Renvoy.'
     : 'This kind of file can be checked, but we cannot make a clean copy for it in this browser. You can still save a check summary in More checks.';
@@ -224,6 +224,10 @@ async function cleanImage() {
   try {
     const beforeFindings = state.findings;
     const redactionPlan = resolveRedactionPlan(beforeFindings);
+    if (redactionPlan.some((item) => item.action === 'crop') && !resolveCropBounds(redactionPlan)) {
+      ui['sanitize-note'].textContent = 'That crop would remove the whole picture. Choose blur or cover for this item instead.';
+      return;
+    }
     state.cleanFile = await sanitizeRasterImage(state.file, redactionPlan);
     state.share = null;
     state.findings = markRedactionsResolved(state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding), redactionPlan);
@@ -374,7 +378,7 @@ function render() {
     if (isImage && finding.boundingBox) {
       const controls = document.createElement('div');
       controls.className = 'finding-actions';
-      for (const action of ['blur', 'cover', 'keep']) {
+      for (const action of ['blur', 'cover', 'crop', 'keep']) {
         const button = document.createElement('button');
         button.className = 'text-button'; button.type = 'button'; button.textContent = action;
         button.addEventListener('click', () => { state.findings = setFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });
@@ -561,7 +565,7 @@ function renderRedactionBox(finding) {
   positionBox(box, finding.boundingBox);
   const label = document.createElement('label');
   const select = document.createElement('select');
-  for (const action of ['blur', 'cover', 'keep']) { const option = new Option(action, action, false, finding.redactionAction === action); select.add(option); }
+  for (const action of ['blur', 'cover', 'crop', 'keep']) { const option = new Option(action, action, false, finding.redactionAction === action); select.add(option); }
   select.addEventListener('change', () => { state.findings = setFindingAction(state.findings, finding.id, select.value); invalidateCleanVerification(); updateReport(); });
   label.append(select); box.append(label);
   const handle = document.createElement('span'); handle.className = 'redaction-handle'; box.append(handle);
