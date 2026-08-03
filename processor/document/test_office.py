@@ -3,6 +3,7 @@ import unittest
 import zipfile
 from pathlib import Path
 import subprocess
+import sys
 
 from office import sanitize_office
 
@@ -64,7 +65,7 @@ class OfficeSanitizerTests(unittest.TestCase):
                 archive.writestr('docProps/core.xml', '<coreProperties/>')
                 archive.writestr('word/document.xml', DOCUMENT)
 
-            subprocess.run(['python3', str(Path(__file__).with_name('office.py')), str(source), str(output)], check=True)
+            subprocess.run([sys.executable, str(Path(__file__).with_name('office.py')), str(source), str(output)], check=True)
 
             self.assertTrue(output.exists())
             with zipfile.ZipFile(output) as archive:

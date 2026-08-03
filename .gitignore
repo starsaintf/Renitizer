@@ -1,5 +1,9 @@
 .DS_Store
 node_modules/
+native-web/
+src-tauri/target/
+.npm-native-cache/
+.npm-wrangler-cache/
 __pycache__/
 .superpowers/
 .wrangler/

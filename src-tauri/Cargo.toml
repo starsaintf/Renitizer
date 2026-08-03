@@ -1,0 +1,13 @@
+[package]
+name = "renitizer"
+version = "0.1.0"
+description = "Renitizer desktop privacy sanitizer"
+authors = ["Galee Labs"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

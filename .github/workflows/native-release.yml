@@ -1,0 +1,255 @@
+name: Renitizer signed native release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_label:
+        description: Human-readable release label for the archived artifacts
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renitizer-native-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Verify source and native web bundle
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run native:sync
+      - run: node --test test/*.test.js worker/test/*.test.js processor/video/test/filter.test.mjs processor/document/test_contract.mjs
+
+  android:
+    name: Signed Android app bundle
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      RENITIZER_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      RENITIZER_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      RENITIZER_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      RENITIZER_RELEASE_STORE_FILE: ${{ github.workspace }}/android/app/renitizer-release.jks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run native:sync
+      - name: Decode Android signing key
+        shell: bash
+        run: |
+          for variable in ANDROID_KEYSTORE_BASE64 RENITIZER_RELEASE_STORE_PASSWORD RENITIZER_RELEASE_KEY_ALIAS RENITIZER_RELEASE_KEY_PASSWORD; do
+            test -n "${!variable}" || { echo "Missing required Android signing secret: $variable" >&2; exit 1; }
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RENITIZER_RELEASE_STORE_FILE"
+          test -s "$RENITIZER_RELEASE_STORE_FILE"
+      - name: Build signed Android app bundle
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+      - name: Verify Android app-bundle signature
+        working-directory: android
+        run: jarsigner -verify -strict -certs app/build/outputs/bundle/release/app-release.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renitizer-android-${{ inputs.release_label }}
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+      - name: Remove Android signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RENITIZER_RELEASE_STORE_FILE"
+
+  ios:
+    name: Signed iOS archive
+    needs: preflight
+    runs-on: macos-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+      APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+      IOS_SIGNING_IDENTITY: ${{ secrets.IOS_SIGNING_IDENTITY }}
+      IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
+      IOS_EXPORT_OPTIONS_PATH: ${{ runner.temp }}/renitizer-ios/ExportOptions.plist
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run native:sync
+      - name: Import iOS signing material
+        shell: bash
+        run: |
+          for variable in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_KEYCHAIN_PASSWORD APPLE_PROVISIONING_PROFILE_BASE64 IOS_TEAM_ID IOS_SIGNING_IDENTITY IOS_PROVISIONING_PROFILE_NAME; do
+            test -n "${!variable}" || { echo "Missing required iOS signing secret: $variable" >&2; exit 1; }
+          done
+          mkdir -p "$RUNNER_TEMP/renitizer-ios" "$HOME/Library/MobileDevice/Provisioning Profiles"
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/renitizer-ios/certificate.p12"
+          printf '%s' "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/renitizer.mobileprovision"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/renitizer-ios/build.keychain"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/renitizer-ios/build.keychain"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/renitizer-ios/build.keychain"
+          security import "$RUNNER_TEMP/renitizer-ios/certificate.p12" -k "$RUNNER_TEMP/renitizer-ios/build.keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/renitizer-ios/build.keychain"
+          security list-keychains -d user -s "$RUNNER_TEMP/renitizer-ios/build.keychain" login.keychain-db
+          security find-identity -v -p codesigning "$RUNNER_TEMP/renitizer-ios/build.keychain"
+      - name: Archive and export signed iOS app
+        shell: bash
+        run: |
+          node scripts/create-ios-export-options.mjs
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/renitizer-ios/Renitizer.xcarchive" archive CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$IOS_TEAM_ID" CODE_SIGN_IDENTITY="$IOS_SIGNING_IDENTITY" PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/renitizer-ios/Renitizer.xcarchive" -exportPath "$RUNNER_TEMP/renitizer-ios/export" -exportOptionsPlist "$IOS_EXPORT_OPTIONS_PATH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renitizer-ios-${{ inputs.release_label }}
+          path: ${{ runner.temp }}/renitizer-ios/export/*.ipa
+          if-no-files-found: error
+      - name: Remove iOS signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/renitizer-ios/build.keychain" || true
+          rm -rf "$RUNNER_TEMP/renitizer-ios" "$HOME/Library/MobileDevice/Provisioning Profiles/renitizer.mobileprovision"
+
+  desktop-windows:
+    name: Signed Windows desktop installer
+    needs: preflight
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      RENITIZER_WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci --no-audit --no-fund
+      - name: Import Windows signing certificate
+        shell: pwsh
+        run: |
+          foreach ($variable in 'WINDOWS_CERTIFICATE_BASE64', 'WINDOWS_CERTIFICATE_PASSWORD', 'RENITIZER_WINDOWS_TIMESTAMP_URL') {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($variable))) { throw "Missing required Windows signing secret: $variable" }
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'renitizer-windows.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate) { throw 'Windows signing certificate import failed.' }
+          "RENITIZER_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build signed Windows installer
+        shell: pwsh
+        run: npx --no-install tauri build --config src-tauri/tauri.conf.json
+      - name: Verify Windows signatures
+        shell: pwsh
+        run: |
+          $artifacts = Get-ChildItem src-tauri\target\release\bundle -Recurse -Include *.exe,*.msi
+          if (-not $artifacts) { throw 'Tauri produced no Windows installer artifacts.' }
+          $artifacts | ForEach-Object {
+            $signature = Get-AuthenticodeSignature $_.FullName
+            if ($signature.Status -ne 'Valid') { throw "Unsigned or invalid installer: $($_.FullName) ($($signature.Status))" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renitizer-desktop-windows-${{ inputs.release_label }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error
+      - name: Remove Windows signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:RENITIZER_WINDOWS_CERTIFICATE_THUMBPRINT) { Remove-Item "Cert:\CurrentUser\My\$env:RENITIZER_WINDOWS_CERTIFICATE_THUMBPRINT" -ErrorAction SilentlyContinue }
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'renitizer-windows.pfx') -Force -ErrorAction SilentlyContinue
+
+  desktop-macos:
+    name: Signed and notarized macOS desktop installer
+    needs: preflight
+    runs-on: macos-latest
+    environment: production
+    timeout-minutes: 60
+    env:
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci --no-audit --no-fund
+      - name: Import macOS signing and notarization material
+        shell: bash
+        run: |
+          for variable in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_KEYCHAIN_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER APPLE_API_KEY MACOS_NOTARY_KEY_BASE64 APPLE_TEAM_ID; do
+            test -n "${!variable}" || { echo "Missing required macOS release secret: $variable" >&2; exit 1; }
+          done
+          mkdir -p "$RUNNER_TEMP/renitizer-macos"
+          printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/renitizer-macos/certificate.p12"
+          printf '%s' "$MACOS_NOTARY_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/renitizer-macos/AuthKey.p8"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/renitizer-macos/build.keychain"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/renitizer-macos/build.keychain"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/renitizer-macos/build.keychain"
+          security import "$RUNNER_TEMP/renitizer-macos/certificate.p12" -k "$RUNNER_TEMP/renitizer-macos/build.keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/renitizer-macos/build.keychain"
+          security list-keychains -d user -s "$RUNNER_TEMP/renitizer-macos/build.keychain" login.keychain-db
+          security find-identity -v -p codesigning "$RUNNER_TEMP/renitizer-macos/build.keychain"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/renitizer-macos/AuthKey.p8" >> "$GITHUB_ENV"
+      - name: Build signed and notarized macOS installer
+        shell: bash
+        run: npx --no-install tauri build --config src-tauri/tauri.conf.json
+      - name: Verify macOS signatures
+        shell: bash
+        run: |
+          app=$(find src-tauri/target/release/bundle -name '*.app' -type d -print -quit)
+          test -n "$app" || { echo 'Tauri produced no macOS app bundle.' >&2; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renitizer-desktop-macos-${{ inputs.release_label }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error
+      - name: Remove macOS signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/renitizer-macos/build.keychain" || true
+          rm -rf "$RUNNER_TEMP/renitizer-macos"

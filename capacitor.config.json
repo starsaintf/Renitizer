@@ -1,1 +1,1 @@
-{"appId":"com.renitizer.app","appName":"Renitizer","webDir":".","server":{"androidScheme":"https"}}
+{"appId":"com.renitizer.app","appName":"Renitizer","webDir":"native-web","server":{"androidScheme":"https"}}

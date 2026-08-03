@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Renitizer</string>
+    <string name="title_activity_main">Renitizer</string>
+    <string name="package_name">com.renitizer.app</string>
+    <string name="custom_url_scheme">com.renitizer.app</string>
+</resources>
