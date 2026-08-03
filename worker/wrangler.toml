@@ -15,12 +15,9 @@ compatibility_date = "2026-07-18"
 # Configure DOCUMENT_PROCESSOR_URL as an environment variable for the private
 # document service's /v1/clean/document endpoint. Do not expose it to the browser.
 
-# Durable processing-job deployment prerequisites. Keep these disabled until
-# the real private R2 bucket and Queue have been provisioned. `POST
-# /api/jobs/upload` returns processing-unconfigured until both bindings exist.
-#
-# Create the resources first, then replace only the placeholder names below.
-# Do not put credentials, account IDs, or deploy-specific IDs in this file.
+# Durable processing-job resources. The production workflow provisions this
+# private bucket and both queues before deployment. Do not put credentials,
+# account IDs, or deploy-specific IDs in this file.
 #
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"

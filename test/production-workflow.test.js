@@ -20,6 +20,7 @@ test('production workflow publishes both private processor images to GHCR behind
   assert.match(workflow, /VIDEO_PROCESSOR_URL: \$\{\{ secrets\.VIDEO_PROCESSOR_URL \}\}/);
   assert.match(workflow, /DOCUMENT_PROCESSOR_URL: \$\{\{ secrets\.DOCUMENT_PROCESSOR_URL \}\}/);
   assert.match(workflow, /RENVOY_IDENTITY_VERIFICATION_URL: \$\{\{ secrets\.RENVOY_IDENTITY_VERIFICATION_URL \}\}/);
+  assert.match(workflow, /node scripts\/provision-infrastructure\.mjs/);
   assert.match(workflow, /wrangler secret bulk \.worker-secrets\.json --config wrangler\.toml/);
 });
 

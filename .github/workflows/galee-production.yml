@@ -75,7 +75,7 @@ jobs:
           node-version: 22
       - name: Install Wrangler
         run: npm install --global wrangler@4
-      - name: Deploy Worker infrastructure
+      - name: Provision private Worker infrastructure and deploy
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -83,6 +83,7 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/provision-infrastructure.mjs
           wrangler deploy --config wrangler.toml
       - name: Apply private Worker secrets and deploy
         working-directory: worker
