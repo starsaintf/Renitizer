@@ -1,4 +1,31 @@
 const DOCUMENT_TYPES = new Set(['pdf', 'office']);
+const DOCUMENT_MIME_TYPES = new Map([
+  ['pdf', 'application/pdf'],
+  ['doc', 'application/msword'], ['dot', 'application/msword'],
+  ['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['docm', 'application/vnd.ms-word.document.macroenabled.12'],
+  ['dotx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.template'],
+  ['dotm', 'application/vnd.ms-word.template.macroenabled.12'],
+  ['xls', 'application/vnd.ms-excel'],
+  ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ['xlsm', 'application/vnd.ms-excel.sheet.macroenabled.12'],
+  ['xlt', 'application/vnd.ms-excel'],
+  ['xltx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.template'],
+  ['xltm', 'application/vnd.ms-excel.template.macroenabled.12'],
+  ['ppt', 'application/vnd.ms-powerpoint'],
+  ['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+  ['pptm', 'application/vnd.ms-powerpoint.presentation.macroenabled.12'],
+  ['pot', 'application/vnd.ms-powerpoint'],
+  ['potx', 'application/vnd.openxmlformats-officedocument.presentationml.template'],
+  ['potm', 'application/vnd.ms-powerpoint.template.macroenabled.12'],
+  ['pps', 'application/vnd.ms-powerpoint'],
+  ['ppsx', 'application/vnd.openxmlformats-officedocument.presentationml.slideshow'],
+  ['ppsm', 'application/vnd.ms-powerpoint.slideshow.macroenabled.12'],
+  ['odt', 'application/vnd.oasis.opendocument.text'],
+  ['ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+  ['odp', 'application/vnd.oasis.opendocument.presentation'],
+  ['rtf', 'application/rtf'],
+]);
 const CATEGORY_ALIASES = new Map([
   ['author', 'author'], ['authors', 'author'], ['creator', 'author'],
   ['comment', 'comment'], ['comments', 'comment'], ['note', 'comment'], ['notes', 'comment'],
@@ -85,7 +112,7 @@ export function createDocumentCleaningJobRequest(file, plan) {
     mediaKind: 'document',
     documentType,
     fileName: String(file?.name || '').trim() || null,
-    mimeType: String(file?.type || '').trim() || null,
+    mimeType: declaredDocumentMimeType(file),
     sizeBytes: Number.isSafeInteger(file?.size) && file.size >= 0 ? file.size : null,
     requestedActions: (plan?.actions || [])
       .filter((action) => action.state === 'supported' && action.action === 'remove')
@@ -110,9 +137,16 @@ export function documentTypeForFile(file) {
   const name = String(file?.name || '').toLowerCase();
   const type = String(file?.type || '').toLowerCase();
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
-  if (/(wordprocessingml|spreadsheetml|presentationml|msword|ms-excel|ms-powerpoint|opendocument)/.test(type)
-    || /\.(docx?|xlsx?|pptx?|odt|ods|odp)$/i.test(name)) return 'office';
+  if (/(wordprocessingml|spreadsheetml|presentationml|msword|ms-excel|ms-powerpoint|opendocument|rtf)/.test(type)
+    || /\.(?:docx?|docm|dotx?|dotm|xlsx?|xlsm|xltx?|xltm|pptx?|pptm|potx?|potm|ppsx?|ppsm|odt|ods|odp|rtf)$/i.test(name)) return 'office';
   return null;
+}
+
+function declaredDocumentMimeType(file) {
+  const browserMime = String(file?.type || '').trim().toLowerCase();
+  if (browserMime && browserMime !== 'application/octet-stream') return browserMime;
+  const extension = /\.([a-z0-9]{1,12})$/i.exec(String(file?.name || ''))?.[1]?.toLowerCase();
+  return DOCUMENT_MIME_TYPES.get(extension) || null;
 }
 
 function normalizeCategory(value) { return CATEGORY_ALIASES.get(String(value || '').trim().toLowerCase()) || null; }

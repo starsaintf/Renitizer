@@ -19,6 +19,21 @@ test('submits an authenticated private upload without placing the capability in 
   assert.equal(await request.options.body.get('file').text(), 'clean me');
 });
 
+test('gives a recognized legacy document a declared MIME type before private upload', async () => {
+  let request;
+  const file = new File(['clean me'], 'old-letter.rtf');
+  const metadata = { kind: 'document-cleaning', mediaKind: 'document', documentType: 'office', fileName: file.name, mimeType: 'application/rtf', sizeBytes: file.size, requestedActions: ['remove-author'] };
+
+  await submitRemoteJob({
+    session: { endpoint: 'https://renitizer.example', capability: 'opaque-capability_123456' }, file, metadata,
+    fetcher: async (_url, options) => { request = options; return Response.json({ job: { id: 'job-2', state: 'queued' } }, { status: 202 }); },
+  });
+
+  assert.equal(request.body.get('file').name, 'old-letter.rtf');
+  assert.equal(request.body.get('file').type, 'application/rtf');
+  assert.equal(await request.body.get('metadata'), JSON.stringify(metadata));
+});
+
 test('downloads a completed private job only with the ephemeral Renvoy capability', async () => {
   let request;
   const file = await downloadRemoteJob({

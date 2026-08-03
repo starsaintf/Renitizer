@@ -19,7 +19,7 @@ import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
 import { createHostedShare, downloadHostedShare, revokeHostedShare } from './share/hosted.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
-import { documentUiCopy } from './documents/presentation.js';
+import { documentReadyCopy, documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
 import { buildVideoSampleTimes } from './video/sampling.js';
 import { linkSampledVideoFindings } from './video/tracking.js';
@@ -350,9 +350,11 @@ async function refreshRemoteDocument() {
   try {
     const status = await getRemoteJob(state.remoteDocument);
     if (status.job?.state === 'complete') {
-      ui['clean-status'].textContent = 'Your private clean copy is ready to save.';
-      ui['sanitize-note'].textContent = 'Your clean document is ready in Renvoy.';
-      state.remoteDocument = { ...state.remoteDocument, ready: true, documentType: state.documentPlan?.documentType };
+      const outputDocumentType = status.job?.output?.documentType || state.documentPlan?.documentType;
+      const readyCopy = documentReadyCopy(state.documentPlan?.documentType, outputDocumentType);
+      ui['clean-status'].textContent = readyCopy.status;
+      ui['sanitize-note'].textContent = readyCopy.note;
+      state.remoteDocument = { ...state.remoteDocument, ready: true, documentType: outputDocumentType };
       ui['download-button'].disabled = false;
     } else if (status.job?.state === 'failed') {
       ui['clean-status'].textContent = 'The private document clean could not finish. Your original was not changed.';

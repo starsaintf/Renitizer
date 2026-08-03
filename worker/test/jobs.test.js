@@ -143,6 +143,11 @@ test('validates an upload against its declared media type and bounded file size'
   }, { name: 'portrait.jpg', type: 'image/jpeg', size: 42 });
   assert.equal(mismatch.valid, false);
   assert.match(mismatch.error, /does not match/i);
+
+  const macroEnabledOffice = validateUploadMetadata({
+    mediaKind: 'document', fileName: 'private.docm', mimeType: 'application/vnd.ms-word.document.macroEnabled.12', sizeBytes: 42,
+  }, { name: 'private.docm', type: 'application/vnd.ms-word.document.macroEnabled.12', size: 42 });
+  assert.equal(macroEnabledOffice.valid, true);
 });
 
 test('rejects raw file content and unsupported media kinds', () => {
@@ -410,13 +415,49 @@ test('queue consumer streams a document to the dedicated processor and stores a 
 
   assert.equal(acknowledged, true);
   assert.equal(current.state, 'complete');
-  assert.deepEqual(current.output, { key: documentOutputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id, documentType: 'pdf' }), contentType: 'application/pdf' });
+  assert.deepEqual(current.output, { key: documentOutputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id, documentType: 'pdf' }), contentType: 'application/pdf', documentType: 'pdf' });
   assert.equal(current.failure, null);
   assert.equal(request.url, 'https://documents.example/v1/clean/document');
   assert.equal(request.options.headers.Authorization, 'Bearer processor-secret');
   assert.equal(request.options.headers['X-Renitizer-Document-Type'], 'pdf');
   assert.equal(request.options.headers['Content-Type'], 'application/pdf');
   assert.equal(writes.some(({ key }) => key === current.output.key), true);
+});
+
+test('queue consumer accepts a legacy Office clean returned as a sanitized PDF', async () => {
+  const record = createStoredJob({
+    kind: 'document-cleaning', mediaKind: 'document', documentType: 'office', fileName: 'archive.doc', mimeType: 'application/msword', sizeBytes: 3,
+    requestedActions: ['remove-author'],
+  }, 'acct_renvoy_alice', () => 'job_legacy', () => '2026-07-19T00:00:00.000Z');
+  const recordKey = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  let current = record;
+  const bucket = {
+    async get(key) {
+      if (key === recordKey) return { json: async () => current };
+      if (key === record.input.key) return { body: new Blob(['raw']).stream() };
+      return null;
+    },
+    async put(key, body) { if (key === recordKey) current = JSON.parse(body); },
+  };
+  const testWorker = createWorker({ processorFetcher: async (_url, options) => {
+    assert.equal(options.headers['X-Renitizer-Document-Extension'], 'doc');
+    return new Response(new Blob(['clean']).stream(), {
+      status: 200,
+      headers: { 'Content-Type': 'application/pdf', 'X-Renitizer-Document-Type': 'pdf' },
+    });
+  } });
+  let acknowledged = false;
+  await testWorker.queue({
+    messages: [{ body: { version: 1, jobId: record.id, ownerAccountId: record.ownerAccountId }, ack() { acknowledged = true; } }],
+  }, { MEDIA_BUCKET: bucket, DOCUMENT_PROCESSOR_URL: 'https://documents.example/v1/clean/document', PROCESSOR_AUTH_TOKEN: 'processor-secret' });
+
+  assert.equal(acknowledged, true);
+  assert.equal(current.state, 'complete');
+  assert.deepEqual(current.output, {
+    key: documentOutputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id, documentType: 'office' }),
+    contentType: 'application/pdf',
+    documentType: 'pdf',
+  });
 });
 
 test('GET /api/jobs/:id/output streams only the owner’s completed private video', async () => {

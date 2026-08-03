@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { documentUiCopy } from '../src/documents/presentation.js';
+import { documentReadyCopy, documentUiCopy } from '../src/documents/presentation.js';
 
 test('uses plain language for a PDF cleaning request without promising a clean file', () => {
   assert.deepEqual(documentUiCopy('pdf'), {
@@ -17,4 +17,11 @@ test('uses plain language for Office files without calling a request a clean cop
   assert.match(copy.saveCopy, /processor returns it/i);
   assert.equal(copy.actionLabel, 'Prepare cleaning request');
   assert.equal(`${copy.saveCopy} ${copy.actionLabel}`.includes('clean copy'), false);
+});
+
+test('plainly explains when a legacy Office file was safely returned as a PDF', () => {
+  assert.deepEqual(documentReadyCopy('office', 'pdf'), {
+    status: 'Your private clean PDF is ready to save.',
+    note: 'Your Office file was turned into a clean PDF so private document details could be removed safely.',
+  });
 });

@@ -4,6 +4,7 @@ import {
   createDocumentCleaningJobRequest,
   createDocumentCleaningReport,
   createDocumentSanitizationPlan,
+  documentTypeForFile,
   normalizeDocumentFindings,
 } from '../src/documents/policy.js';
 
@@ -32,6 +33,13 @@ test('normalizes PDF privacy findings into stable document categories', () => {
     { id: 'document-font-1', category: 'font', action: 'remove' },
   ]);
   assert.equal(findings.every((finding) => finding.documentType === 'pdf' && finding.assessment === 'assessed'), true);
+});
+
+test('recognizes macro-enabled and OpenDocument Office files for the private processor', () => {
+  assert.equal(documentTypeForFile({ name: 'draft.docm', type: '' }), 'office');
+  assert.equal(documentTypeForFile({ name: 'budget.xlsm', type: 'application/vnd.ms-excel.sheet.macroEnabled.12' }), 'office');
+  assert.equal(documentTypeForFile({ name: 'slides.pptm', type: 'application/vnd.ms-powerpoint.presentation.macroEnabled.12' }), 'office');
+  assert.equal(documentTypeForFile({ name: 'notes.odt', type: 'application/vnd.oasis.opendocument.text' }), 'office');
 });
 
 test('normalizes Office labels without exposing extracted private values', () => {
@@ -87,6 +95,14 @@ test('creates a metadata-only document-cleaning job request', () => {
   });
   assert.equal('file' in request, false);
   assert.equal('content' in request, false);
+});
+
+test('declares a safe MIME type for legacy document uploads when a browser omits one', () => {
+  const request = createDocumentCleaningJobRequest({
+    name: 'old-letter.rtf', type: '', size: 256,
+  }, createDocumentSanitizationPlan('office', []));
+
+  assert.equal(request.mimeType, 'application/rtf');
 });
 
 test('makes a safe document report without claiming an output exists', () => {

@@ -27,11 +27,16 @@ jobs:
         run: |
           docker build --tag renitizer-video-smoke ./processor/video
           docker run --rm -e RENITIZER_FFMPEG_SMOKE=1 --entrypoint node --volume "$GITHUB_WORKSPACE/processor/video:/tests:ro" renitizer-video-smoke /tests/test/ffmpeg-smoke.mjs
+      - name: Build and run LibreOffice document-cleaning smoke test
+        run: |
+          docker build --tag renitizer-document-smoke ./processor/document
+          docker run --rm -e RENITIZER_LIBREOFFICE_SMOKE=1 --entrypoint node --volume "$GITHUB_WORKSPACE/processor/document:/tests:ro" renitizer-document-smoke /tests/test/libreoffice-smoke.mjs
       - name: Verify browser, Worker, and processor sources
         run: |
           node --check src/main.js
           node --check worker/src/index.js
-          node --test test/*.test.js worker/test/*.test.js processor/video/test/filter.test.mjs processor/document/test_contract.mjs
+          node --test test/*.test.js worker/test/*.test.js processor/video/test/filter.test.mjs processor/document/test_contract.mjs processor/document/test_runner.mjs
+          python3 processor/document/test_office.py
 
   build-processors:
     if: github.repository_owner == 'Galee-Labs'

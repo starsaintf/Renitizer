@@ -1,12 +1,52 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// This runner executes inside the Linux document container, even when its
+// contract tests run from a Windows checkout.
+import { basename, dirname, extname, join } from 'node:path/posix';
 import { buildPdfSanitizeCommand, normalizeDocumentType } from './contract.mjs';
 
 const defaultOfficeScript = fileURLToPath(new URL('./office.py', import.meta.url));
+const OOXML_EXTENSIONS = new Set(['docx', 'docm', 'dotx', 'dotm', 'xlsx', 'xlsm', 'xltx', 'xltm', 'pptx', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm']);
+const LIBREOFFICE_PDF_EXTENSIONS = new Set(['doc', 'xls', 'ppt', 'odt', 'ods', 'odp', 'rtf']);
 
-export async function runDocumentSanitizer({ documentType, inputPath, outputPath, execute = runCommand, officeScriptPath = defaultOfficeScript }) {
-  if (normalizeDocumentType(documentType) === 'pdf') return execute('qpdf', buildPdfSanitizeCommand(inputPath, outputPath));
-  return execute('python3', [officeScriptPath, inputPath, outputPath]);
+export function documentSanitizationPlan({ documentType, sourceExtension } = {}) {
+  const normalizedType = normalizeDocumentType(documentType);
+  if (normalizedType === 'pdf') return { strategy: 'qpdf', outputDocumentType: 'pdf', outputExtension: 'pdf' };
+  const extension = normalizeSourceExtension(sourceExtension);
+  if (!extension || OOXML_EXTENSIONS.has(extension)) {
+    return { strategy: 'office-package', outputDocumentType: 'office', outputExtension: extension || 'office' };
+  }
+  if (LIBREOFFICE_PDF_EXTENSIONS.has(extension)) {
+    return { strategy: 'libreoffice-pdf', outputDocumentType: 'pdf', outputExtension: 'pdf' };
+  }
+  throw new Error('Unsupported Office document extension.');
+}
+
+export async function runDocumentSanitizer({ documentType, sourceExtension, inputPath, outputPath, execute = runCommand, officeScriptPath = defaultOfficeScript }) {
+  const plan = documentSanitizationPlan({ documentType, sourceExtension });
+  if (plan.strategy === 'qpdf') {
+    await execute('qpdf', buildPdfSanitizeCommand(inputPath, outputPath));
+    return plan;
+  }
+  if (plan.strategy === 'office-package') {
+    await execute('python3', [officeScriptPath, inputPath, outputPath]);
+    return plan;
+  }
+  const outputDirectory = dirname(outputPath);
+  const convertedPdf = join(outputDirectory, `${basename(inputPath, extname(inputPath))}.pdf`);
+  await execute('libreoffice', [
+    '--headless', '--nologo', '--nodefault', '--nolockcheck', '--norestore',
+    '--convert-to', 'pdf', '--outdir', outputDirectory, inputPath,
+  ]);
+  await execute('qpdf', buildPdfSanitizeCommand(convertedPdf, outputPath));
+  return plan;
+}
+
+function normalizeSourceExtension(value) {
+  const extension = String(value || '').replace(/^\./, '').toLowerCase();
+  if (!extension) return '';
+  if (!/^[a-z0-9]{1,12}$/.test(extension)) throw new Error('Document extension is invalid.');
+  return extension;
 }
 
 function runCommand(command, args) {

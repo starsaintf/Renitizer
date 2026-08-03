@@ -1,12 +1,21 @@
 export async function submitRemoteJob({ session, file, metadata, fetcher = fetch }) {
+  const uploadFile = fileWithDeclaredMimeType(file, metadata?.mimeType);
   const form = new FormData();
   form.set('metadata', JSON.stringify(metadata));
-  form.set('file', file, file.name);
+  form.set('file', uploadFile, uploadFile.name);
   const response = await fetcher(`${session.endpoint}/api/jobs/upload`, {
     method: 'POST', headers: { Authorization: `Renvoy ${session.capability}` }, body: form,
   });
   if (!response.ok) throw new Error('Private processing could not start.');
   return response.json();
+}
+
+function fileWithDeclaredMimeType(file, declaredMimeType) {
+  const expected = String(declaredMimeType || '').trim().toLowerCase();
+  const actual = String(file?.type || '').trim().toLowerCase();
+  if (!expected || actual === expected) return file;
+  if (actual && actual !== 'application/octet-stream') throw new Error('The selected file type no longer matches the private processing request.');
+  return new File([file], file.name, { type: expected, lastModified: file.lastModified });
 }
 
 export async function getRemoteJob({ session, jobId, fetcher = fetch }) {

@@ -1,6 +1,8 @@
 FROM node:22-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 qpdf && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 qpdf libreoffice-writer libreoffice-calc libreoffice-impress \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY contract.mjs runner.mjs server.mjs office.py ./

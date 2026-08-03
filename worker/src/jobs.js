@@ -169,7 +169,7 @@ export function serializeJobStatus(job, configuration) {
       sizeBytes: job.sizeBytes,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
-      ...(job.output ? { output: { available: true, mimeType: job.output.contentType } } : {}),
+      ...(job.output ? { output: { available: true, mimeType: job.output.contentType, ...(job.output.documentType ? { documentType: job.output.documentType } : {}) } } : {}),
       ...(job.failure ? { failure: job.failure } : {}),
     },
     processing: configuration,
@@ -195,5 +195,5 @@ function mimeMatchesMediaKind(mediaKind, mimeType) {
   if (mediaKind === 'image') return /^image\/[A-Za-z0-9.+-]+$/.test(mimeType);
   if (mediaKind === 'video') return /^video\/[A-Za-z0-9.+-]+$/.test(mimeType);
   if (mediaKind === 'audio') return /^audio\/[A-Za-z0-9.+-]+$/.test(mimeType);
-  return mimeType === 'application/pdf' || /^application\/(?:msword|vnd\.(?:openxmlformats-officedocument|ms-excel|ms-powerpoint)\.)/.test(mimeType);
+  return mimeType === 'application/pdf' || /^application\/(?:msword|rtf|vnd\.(?:openxmlformats-officedocument|ms-word|ms-excel|ms-powerpoint|oasis\.opendocument)\.)/.test(mimeType);
 }

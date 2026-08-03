@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { runDocumentSanitizer } from './runner.mjs';
+import { documentSanitizationPlan, runDocumentSanitizer } from './runner.mjs';
 import { normalizeDocumentType } from './contract.mjs';
 
 const port = Number(process.env.PORT ?? 8080);
@@ -21,18 +21,24 @@ createServer(async (request, response) => {
   try { documentType = normalizeDocumentType(request.headers['x-renitizer-document-type']); }
   catch { return send(response, 400, 'X-Renitizer-Document-Type must be pdf or office'); }
   if (!validContentType(documentType, request.headers['content-type'])) return send(response, 415, 'Unexpected document content type');
+  let sourceExtension;
+  let plan;
+  try {
+    sourceExtension = sourceExtensionFor(documentType, request.headers['x-renitizer-document-extension']);
+    plan = documentSanitizationPlan({ documentType, sourceExtension });
+  } catch { return send(response, 400, 'Unsupported document format'); }
   const length = Number(request.headers['content-length'] ?? 0);
   if (!Number.isFinite(length) || length < 1 || length > maxBytes) return send(response, 413, 'Document is too large');
   const directory = await mkdtemp(join(tmpdir(), 'renitizer-document-'));
-  const input = join(directory, documentType === 'pdf' ? 'input.pdf' : 'input.office');
-  const output = join(directory, documentType === 'pdf' ? 'output.pdf' : 'output.office');
+  const input = join(directory, `input.${sourceExtension}`);
+  const output = join(directory, `output.${plan.outputExtension}`);
   try {
     await writeBounded(request, input, maxBytes);
-    await runDocumentSanitizer({ documentType, inputPath: input, outputPath: output });
+    const result = await runDocumentSanitizer({ documentType, sourceExtension, inputPath: input, outputPath: output });
     if ((await stat(output)).size < 1) throw new Error('The document processor produced an empty output.');
     response.writeHead(200, {
-      'Content-Type': documentType === 'pdf' ? 'application/pdf' : 'application/octet-stream',
-      'X-Renitizer-Document-Type': documentType,
+      'Content-Type': result.outputDocumentType === 'pdf' ? 'application/pdf' : 'application/octet-stream',
+      'X-Renitizer-Document-Type': result.outputDocumentType,
       'Cache-Control': 'no-store',
     });
     await pipeline(createReadStream(output), response);
@@ -56,7 +62,14 @@ function timingSafeEqual(left, right) {
 
 function validContentType(documentType, value = '') {
   const contentType = value.split(';', 1)[0].toLowerCase();
-  return documentType === 'pdf' ? contentType === 'application/pdf' : /application\/(?:vnd\.(?:openxmlformats-officedocument|ms-excel|ms-powerpoint)|msword)/.test(contentType);
+  return documentType === 'pdf' ? contentType === 'application/pdf' : /application\/(?:vnd\.(?:openxmlformats-officedocument|ms-word|ms-excel|ms-powerpoint|oasis\.opendocument)|msword|rtf)/.test(contentType);
+}
+
+function sourceExtensionFor(documentType, value) {
+  if (documentType === 'pdf') return 'pdf';
+  const extension = String(value || '').trim().replace(/^\./, '').toLowerCase();
+  if (!/^[a-z0-9]{1,12}$/.test(extension)) throw new Error('Document extension is invalid.');
+  return extension;
 }
 
 async function writeBounded(source, destination, limit) {
