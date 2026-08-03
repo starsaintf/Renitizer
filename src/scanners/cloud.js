@@ -3,17 +3,47 @@ import { clampNormalizedBox } from '../sanitize/redaction.js';
 
 const requiredFields = ['id', 'category', 'title', 'detail', 'severity', 'confidence'];
 
-export async function requestCloudAnalysis({ endpoint, file, files, analyses, frameContext, consent }) {
+export async function requestCloudAnalysis({ endpoint, file, files, analyses, frameContext, consent, session, fetcher = fetch }) {
   if (!consent) throw new Error('Cloud analysis requires explicit consent.');
-  if (!endpoint) throw new Error('Enter a cloud analysis endpoint before sending a file.');
   const selectedFiles = files || (file ? [file] : []);
   if (!selectedFiles.length) throw new Error('Choose a file before requesting cloud analysis.');
+  const service = resolveCloudService({ endpoint, session });
 
   const form = buildCloudAnalysisForm({ files: selectedFiles, analyses, frameContext });
-  const response = await fetch(endpoint, { method: 'POST', body: form, headers: { Accept: 'application/json' } });
+  const response = await fetcher(service.endpoint, { method: 'POST', body: form, headers: service.headers });
   if (!response.ok) throw new Error(`Cloud analysis failed (${response.status}).`);
   const payload = await response.json();
   return normalizeCloudFindings(payload.findings);
+}
+
+export function resolveCloudService({ endpoint, session } = {}) {
+  const explicitEndpoint = String(endpoint ?? '').trim();
+  const trustedSession = validSession(session);
+  const target = explicitEndpoint || (trustedSession ? `${trustedSession.endpoint}/api/analyze` : '');
+  if (!target) throw new Error('Open Renitizer from Renvoy or enter the address of a service you trust.');
+
+  let parsed;
+  try { parsed = new URL(target); }
+  catch { throw new Error('Enter a valid secure service address.'); }
+  if (parsed.protocol !== 'https:' && !isLoopback(parsed)) throw new Error('Enter a valid secure service address.');
+
+  const authorization = trustedSession && parsed.origin === trustedSession.endpoint
+    ? { Authorization: `Renvoy ${trustedSession.capability}` }
+    : {};
+  return { endpoint: parsed.href, headers: { Accept: 'application/json', ...authorization } };
+}
+
+function validSession(session) {
+  if (typeof session?.capability !== 'string' || !/^[A-Za-z0-9._-]{16,8192}$/.test(session.capability)) return null;
+  try {
+    const endpoint = new URL(session.endpoint);
+    if (endpoint.protocol !== 'https:') return null;
+    return { endpoint: endpoint.origin, capability: session.capability };
+  } catch { return null; }
+}
+
+function isLoopback(url) {
+  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 }
 
 export function buildCloudAnalysisForm({ files = [], analyses = [], frameContext } = {}) {

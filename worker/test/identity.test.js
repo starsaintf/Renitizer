@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { introspectRenvoyIdentity, parseRenvoyAuthorization } from '../src/identity.js';
+import { createWorker } from '../src/index.js';
 
 test('parses only a single Renvoy authorization credential', () => {
   assert.equal(parseRenvoyAuthorization('Renvoy opaque-token_123'), 'opaque-token_123');
@@ -74,4 +75,41 @@ test('fails closed when Renvoy is unavailable or does not grant Renitizer use', 
     principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: [] },
   }));
   assert.deepEqual(noScopes, { state: 'unauthorized' });
+});
+
+test('requires the same Renvoy identity before using the cloud analysis route', async () => {
+  const response = await createWorker().fetch(new Request('https://worker.example/api/analyze', {
+    method: 'POST',
+    body: new FormData(),
+  }), {
+    OPENAI_API_KEY: 'test-key',
+    RENVOY_IDENTITY_VERIFICATION_URL: 'https://identity.renvoy.example/v1/identity/renitizer/verify',
+  });
+
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error.code, 'unauthorized');
+});
+
+test('allows an authenticated Renvoy account to use the cloud analysis route', async () => {
+  let providerRequest;
+  const app = createWorker({
+    identityFetcher: async () => Response.json({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }),
+    analysisFetcher: async (url, options) => {
+      providerRequest = { url, options };
+      return Response.json({ output_text: JSON.stringify({ findings: [] }) });
+    },
+  });
+  const form = new FormData();
+  form.set('file', new File(['image'], 'private.jpg', { type: 'image/jpeg' }));
+  const response = await app.fetch(new Request('https://worker.example/api/analyze', {
+    method: 'POST', headers: { Authorization: 'Renvoy opaque-token_123' }, body: form,
+  }), {
+    OPENAI_API_KEY: 'test-key',
+    RENVOY_IDENTITY_VERIFICATION_URL: 'https://identity.renvoy.example/v1/identity/renitizer/verify',
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { findings: [] });
+  assert.equal(providerRequest.url, 'https://api.openai.com/v1/responses');
+  assert.equal(providerRequest.options.headers.Authorization, 'Bearer test-key');
 });

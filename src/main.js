@@ -234,10 +234,12 @@ async function cleanImage() {
     state.share = null;
     state.findings = markRedactionsResolved(state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding), redactionPlan);
     const postClean = await rerunCleanScanners(state.cleanFile, state.availableChecks);
+    const cloudSession = ui['cloud-consent'].checked ? await requestRenvoySession() : null;
     const cloudRecheck = await recheckCleanImage({
       file: state.cleanFile,
       endpoint: ui['cloud-endpoint'].value,
       consent: ui['cloud-consent'].checked,
+      session: cloudSession?.available ? cloudSession : null,
       requestCloudAnalysis,
     });
     state.verification = createVerification({
@@ -365,7 +367,8 @@ async function cloudScan() {
   try {
     const frameSamples = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : null;
     const cloudFiles = frameSamples ? frameSamples.map((sample) => sample.file) : [state.file];
-    const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], frameContext: frameSamples?.map(({ time, duration }) => ({ time, duration })), consent: ui['cloud-consent'].checked });
+    const cloudSession = await requestRenvoySession();
+    const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], frameContext: frameSamples?.map(({ time, duration }) => ({ time, duration })), consent: ui['cloud-consent'].checked, session: cloudSession.available ? cloudSession : null });
     const findingsForReview = frameSamples
       ? linkSampledVideoFindings(cloudFindings, { sampleTimes: frameSamples.map(({ time }) => time), duration: state.video.duration })
       : cloudFindings;
@@ -374,7 +377,7 @@ async function cloudScan() {
     state.receiptReady = Boolean(state.file?.type.startsWith('video/'));
     ui['cloud-status'].textContent = `Your extra check returned ${findingsForReview.length} item${findingsForReview.length === 1 ? '' : 's'}.`;
     updateReport();
-  } catch (error) { ui['cloud-status'].textContent = 'That extra check could not finish. Check the service address and try again.'; }
+  } catch (error) { ui['cloud-status'].textContent = error?.message || 'That extra check could not finish. Check the service address and try again.'; }
   finally { idle(ui['cloud-button'], 'Send for an extra check'); }
 }
 

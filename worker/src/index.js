@@ -59,7 +59,7 @@ const findingSchema = {
   },
 };
 
-export function createWorker({ identityFetcher = fetch, processorFetcher = fetch } = {}) {
+export function createWorker({ identityFetcher = fetch, processorFetcher = fetch, analysisFetcher = fetch } = {}) {
   return {
     async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -84,7 +84,7 @@ export function createWorker({ identityFetcher = fetch, processorFetcher = fetch
     const files = form.getAll('file').filter((file) => file instanceof File);
     if (!files.length) return json({ error: 'At least one media file is required.' }, 400);
     const frameContexts = parseFrameContexts(form.get('frameContext'), files.length);
-    const findings = (await Promise.all(files.map((file, index) => analyzeMedia(file, env, frameContexts[index])))).flat();
+    const findings = (await Promise.all(files.map((file, index) => analyzeMedia(file, env, frameContexts[index], analysisFetcher)))).flat();
     return json({ findings });
     },
     async queue(batch, env) {
@@ -213,7 +213,8 @@ async function downloadJobOutput(jobId, env, identity) {
 }
 
 function isRemoteRoute(pathname) {
-  return pathname === '/api/jobs'
+  return pathname === '/api/analyze'
+    || pathname === '/api/jobs'
     || pathname.startsWith('/api/jobs/')
     || pathname === '/api/document-cleaning'
     || pathname === '/api/share'
@@ -454,16 +455,16 @@ async function requireRenvoyIdentity(request, env, fetcher) {
   return json({ error: { code: 'unauthorized', message: 'A valid Renvoy identity is required.' } }, 401);
 }
 
-async function analyzeMedia(file, env, frameContext = null) {
-  if (file.type.startsWith('audio/')) return transcribeAudio(file, env);
+async function analyzeMedia(file, env, frameContext = null, analysisFetcher = fetch) {
+  if (file.type.startsWith('audio/')) return transcribeAudio(file, env, analysisFetcher);
   if (file.type.startsWith('video/')) return [unavailable('cloud-video-frame-required', 'Send sampled image frames from the video to this vision endpoint, or configure a dedicated cloud video endpoint.')];
   if (!file.type.startsWith('image/')) return [unavailable('cloud-media-boundary', 'This endpoint accepts image files, audio transcription, or sampled video image frames.')];
-  return analyzeImage(file, env, frameContext);
+  return analyzeImage(file, env, frameContext, analysisFetcher);
 }
 
-async function analyzeImage(file, env, frameContext = null) {
+async function analyzeImage(file, env, frameContext = null, analysisFetcher = fetch) {
   const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
-  const upstream = await fetch('https://api.openai.com/v1/responses', {
+  const upstream = await analysisFetcher('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(buildImageVisionRequest(`data:${file.type};base64,${base64}`)),
   });
@@ -508,9 +509,9 @@ export function buildImageVisionRequest(imageUrl) {
   };
 }
 
-async function transcribeAudio(file, env) {
+async function transcribeAudio(file, env, analysisFetcher = fetch) {
   const body = buildTimestampedTranscriptionBody(file);
-  const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body });
+  const upstream = await analysisFetcher('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body });
   if (!upstream.ok) return [unavailable('cloud-transcription-failed', 'Audio transcription provider request failed; local findings were retained.')];
   const payload = await upstream.json();
   return transcriptFindings(payload.text || '', payload.words);

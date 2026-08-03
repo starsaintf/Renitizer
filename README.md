@@ -28,13 +28,15 @@ Renitizer does not provide share storage, uploads, or public links by default. T
 
 ## Optional cloud worker
 
-The static app never has a secret and never automatically uploads a file. To enable the consent-gated endpoint:
+The static app never has a secret and never automatically uploads a file. When Renitizer is opened from Renvoy, the same short-lived `renitizer:use` capability that protects private jobs also protects `POST /api/analyze`; the app uses the Renvoy Worker origin automatically after the person explicitly agrees to the extra check. A custom service address remains available, but Renitizer never sends a Renvoy capability to a different origin.
+
+To enable the account-bound Cloudflare endpoint:
 
 1. Create a Cloudflare Worker from `worker/`, then set the server secret: `wrangler secret put OPENAI_API_KEY`.
-2. Deploy it with `wrangler deploy` and paste `https://your-worker.example/api/analyze` in the dashboard's Provider endpoint field.
-3. Check the clear consent box. Only then does the browser POST the selected file and requested analysis types.
+2. Set `RENVOY_IDENTITY_VERIFICATION_URL` to the Renvoy verification endpoint, then deploy it with `wrangler deploy`.
+3. Check the clear consent box. Only then does the browser POST the selected file and requested analysis types through the Renvoy session. A custom service address is only needed outside Renvoy.
 
-`worker/src/index.js` sends image files (including client-sampled video frames) to OpenAI's vision Responses API. It can flag visible privacy clues such as faces, plates, screens, documents, signs, maps, landmarks, and route displays, but these are clues to review—not proof of a person's identity, an exact place, or a reverse-image/OSINT match. For actionable audio editing it sends audio to `/v1/audio/transcriptions` using `whisper-1`, `verbose_json`, and word timestamps before inspecting transcript PII cues. A video sent directly to the Worker gets a specific sampled-frame/dedicated-endpoint requirement. Put authentication, origin restrictions, size limits, and a provider-specific video path in front of a production deployment.
+`worker/src/index.js` sends image files (including client-sampled video frames) to OpenAI's vision Responses API. It can flag visible privacy clues such as faces, plates, screens, documents, signs, maps, landmarks, and route displays, but these are clues to review—not proof of a person's identity, an exact place, or a reverse-image/OSINT match. For actionable audio editing it sends audio to `/v1/audio/transcriptions` using `whisper-1`, `verbose_json`, and word timestamps before inspecting transcript PII cues. A video sent directly to the Worker gets a specific sampled-frame/dedicated-endpoint requirement.
 
 Never put `OPENAI_API_KEY` in `config.js`, `config.example.js`, the browser, or source control.
 

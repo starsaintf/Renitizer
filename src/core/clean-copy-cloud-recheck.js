@@ -2,14 +2,16 @@
  * Reuses a user's explicit extra-check consent for one narrow purpose: check
  * the newly-created image copy. It never sends the source image from here.
  */
-export async function recheckCleanImage({ file, endpoint, consent, requestCloudAnalysis } = {}) {
-  if (!consent || !String(endpoint || '').trim() || !file?.type?.startsWith('image/')) {
+export async function recheckCleanImage({ file, endpoint, consent, session, requestCloudAnalysis } = {}) {
+  const hasNamedService = Boolean(String(endpoint || '').trim()) || Boolean(session?.available && session?.endpoint && session?.capability);
+  if (!consent || !hasNamedService || !file?.type?.startsWith('image/')) {
     return emptyResult(false);
   }
 
   try {
     const findings = await requestCloudAnalysis({
-      endpoint: String(endpoint).trim(),
+      ...(String(endpoint || '').trim() ? { endpoint: String(endpoint).trim() } : {}),
+      ...(session?.available ? { session } : {}),
       file,
       analyses: ['visual-pii', 'clean-copy-verification'],
       consent: true,

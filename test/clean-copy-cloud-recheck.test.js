@@ -36,6 +36,26 @@ test('rechecks only the clean image and marks the cloud check as completed when 
   assert.deepEqual(result.findings, [{ ...finding, id: 'verify-cloud-cloud-plate', verificationCheck: 'cloud', detail: 'In the clean copy: A plate is visible.' }]);
 });
 
+test('uses the trusted Renvoy session for a clean-copy recheck when no custom service is supplied', async () => {
+  let request;
+  const session = { available: true, endpoint: 'https://renitizer.example', capability: 'opaque-capability_123456' };
+  const result = await recheckCleanImage({
+    file,
+    consent: true,
+    session,
+    requestCloudAnalysis: async (value) => { request = value; return []; },
+  });
+
+  assert.deepEqual(request, {
+    file,
+    analyses: ['visual-pii', 'clean-copy-verification'],
+    consent: true,
+    session,
+  });
+  assert.equal(result.attempted, true);
+  assert.deepEqual(result.providerResults, { cloud: true });
+});
+
 test('does not call an unavailable provider result a completed recheck', async () => {
   const result = await recheckCleanImage({
     file,

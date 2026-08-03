@@ -168,10 +168,10 @@
               <button id="deep-scan-button" class="button quiet" type="button" disabled>Look for writing</button>
             </section>
             <section>
-              <h2>Use a private analysis service you trust</h2>
-              <p>If you choose this, a copy of your selected file is sent to the address you enter. Nothing is sent until you agree below.</p>
-              <label class="field-label" for="cloud-endpoint">Service address</label><input id="cloud-endpoint" type="url" placeholder="https://your-service.example/check" autocomplete="off">
-              <label class="consent"><input id="cloud-consent" type="checkbox"><span>I understand that this sends my selected file to this service for an extra check. If I make a clean image copy, it will send that clean copy once more to check for anything left behind.</span></label>
+              <h2>Use an extra private check</h2>
+              <p>When you open Renitizer from Renvoy, this uses your private service automatically. Otherwise, enter a service you trust.</p>
+              <label class="field-label" for="cloud-endpoint">Service address (only if you need one)</label><input id="cloud-endpoint" type="url" placeholder="https://your-service.example/check" autocomplete="off">
+              <label class="consent"><input id="cloud-consent" type="checkbox"><span>I understand that this sends my selected file to Renvoy or the service above for an extra check. If I make a clean image copy, it will send that clean copy once more to check for anything left behind.</span></label>
               <button id="cloud-button" class="button quiet" type="button" disabled>Send for an extra check</button>
               <p id="cloud-status" class="microcopy">No file has been sent.</p>
             </section>
