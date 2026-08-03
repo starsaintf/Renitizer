@@ -115,7 +115,7 @@ async function selectFile(file) {
     : isImage
     ? 'For supported images, make a metadata-free copy and choose which marked areas to blur or cover.'
     : isVideo
-    ? 'Use the optional extra check to find moments to cover. Your video is sent privately only after you choose cover and start the clean from Renvoy.'
+    ? 'Use the optional extra check to find moments to protect. Your video is sent privately only after you choose blur or cover and start the clean from Renvoy.'
     : 'This kind of file can be checked, but we cannot make a clean copy for it in this browser. You can still save a check summary in More checks.';
   render();
   if (isAudio) {
@@ -276,7 +276,7 @@ async function cleanVideo() {
   if (!state.file || !state.video.duration) return;
   const tracks = normalizeTrackedVideoBoxes({ duration: state.video.duration, tracks: state.findings });
   if (!tracks.length) {
-    ui['sanitize-note'].textContent = 'Run an extra video check, then choose cover for at least one marked moment.';
+    ui['sanitize-note'].textContent = 'Run an extra video check, then choose blur or cover for at least one marked moment.';
     return;
   }
   busy(ui['sanitize-button'], 'Starting private video clean…');
@@ -396,7 +396,7 @@ function render() {
     if (state.file?.type.startsWith('video/') && finding.boundingBox && finding.timeRange) {
       const controls = document.createElement('div');
       controls.className = 'finding-actions';
-      for (const action of ['cover', 'keep']) {
+      for (const action of ['blur', 'cover', 'keep']) {
         const button = document.createElement('button');
         button.className = 'text-button'; button.type = 'button'; button.textContent = action;
         button.addEventListener('click', () => { state.findings = selectVideoFindingAction(state.findings, finding.id, action); invalidateCleanVerification(); updateReport(); });

@@ -12,6 +12,8 @@ test('production workflow publishes both private processor images to GHCR behind
   assert.match(workflow, /environment:\s*production/);
   assert.match(workflow, /docker\/login-action@v3/);
   assert.match(workflow, /docker\/build-push-action@v6/);
+  assert.match(workflow, /docker build --tag renitizer-video-smoke \.\/processor\/video/);
+  assert.match(workflow, /\/tests\/test\/ffmpeg-smoke\.mjs/);
   assert.match(workflow, /ghcr\.io\/galee-labs\/renitizer-\$\{\{ matrix\.processor \}\}/);
   assert.match(workflow, /OPENAI_API_KEY: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
   assert.match(workflow, /PROCESSOR_AUTH_TOKEN: \$\{\{ secrets\.PROCESSOR_AUTH_TOKEN \}\}/);

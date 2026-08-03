@@ -1,6 +1,6 @@
 import { clampNormalizedBox } from '../sanitize/redaction.js';
 
-const ACTIONS = new Set(['cover']);
+const ACTIONS = new Set(['blur', 'cover']);
 
 export function normalizeTrackedVideoBoxes({ duration, tracks = [] } = {}) {
   const boundedDuration = positiveNumber(duration);
@@ -47,7 +47,7 @@ export function getVideoReviewItems(findings = []) {
 }
 
 export function selectVideoFindingAction(findings = [], id, action) {
-  if (!['cover', 'keep'].includes(action)) return findings;
+  if (!['blur', 'cover', 'keep'].includes(action)) return findings;
   return findings.map((finding) => finding.id === id
     ? { ...finding, redactionAction: action, resolved: false }
     : finding);

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
-import { buildCoverFilter, normalizeRendererTracks } from './filter.mjs';
+import { buildVideoFilterGraph, normalizeRendererTracks } from './filter.mjs';
 
 const port = Number(process.env.PORT ?? 8080);
 const secret = process.env.PROCESSOR_AUTH_TOKEN ?? '';
@@ -37,7 +37,7 @@ async function handle(request, response) {
   const output = path.join(tempDir, 'output.mp4');
   try {
     await pipeline(request, maximumSize(maximumBytes), fs.createWriteStream(input, { flags: 'wx' }));
-    await render(input, output, buildCoverFilter(tracks));
+    await render(input, output, buildVideoFilterGraph(tracks));
     const size = (await fsp.stat(output)).size;
     response.writeHead(200, {
       'content-type': 'video/mp4',
@@ -87,12 +87,12 @@ function maximumSize(limit) {
   });
 }
 
-function render(input, output, filter) {
+function render(input, output, graph) {
   return new Promise((resolve, reject) => {
     const child = spawn('ffmpeg', [
       '-hide_banner', '-loglevel', 'error', '-y', '-i', input,
-      '-vf', filter,
-      '-map', '0:v:0', '-map', '0:a?',
+      '-filter_complex', graph.filterComplex,
+      '-map', graph.outputLabel, '-map', '0:a?',
       '-map_metadata', '-1',
       '-c:v', 'libx264', '-crf', '20', '-preset', 'medium',
       '-c:a', 'aac', '-movflags', '+faststart', output,

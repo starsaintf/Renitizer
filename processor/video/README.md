@@ -1,6 +1,8 @@
 # Renitizer video renderer
 
-This service receives an authenticated video stream and a compact list of normalized cover tracks. It uses FFmpeg to render black, time-bounded boxes, removes mapped metadata, keeps the optional audio stream, and returns a new MP4. It never receives original filenames or Renvoy credentials.
+This service receives an authenticated video stream and a compact list of normalized blur or cover tracks. It uses FFmpeg to render time-bounded redactions, removes mapped metadata, keeps the optional audio stream, and returns a new MP4. It never receives original filenames or Renvoy credentials.
+
+Choose **cover** for the strongest visual block. **Blur** retains more of the scene, so review the rendered video before sharing it.
 
 Required environment variables:
 

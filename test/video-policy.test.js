@@ -8,7 +8,7 @@ import {
   selectVideoFindingAction,
 } from '../src/video/policy.js';
 
-test('normalizes selected tracked video boxes into bounded time ranges', () => {
+test('normalizes selected blur and cover video boxes into bounded time ranges', () => {
   const plan = normalizeTrackedVideoBoxes({
     duration: 12,
     tracks: [
@@ -19,6 +19,7 @@ test('normalizes selected tracked video boxes into bounded time ranges', () => {
   });
 
   assert.deepEqual(plan, [
+    { id: 'plate', action: 'blur', startTime: 0, endTime: 12, box: { x: 0, y: 0.8, width: 0.3, height: 0.2 } },
     { id: 'face', action: 'cover', startTime: 4, endTime: 8, box: { x: 0.2, y: 0.1, width: 0.2, height: 0.3 } },
   ]);
 });
@@ -39,11 +40,11 @@ test('getVideoReviewItems exposes only boxed time-bounded moments', () => {
   ]);
 });
 
-test('selectVideoFindingAction keeps a cover choice pending until a rendered output exists', () => {
+test('selectVideoFindingAction keeps a blur choice pending until a rendered output exists', () => {
   assert.deepEqual(selectVideoFindingAction([
     { id: 'plate', redactionAction: 'keep', resolved: false },
-  ], 'plate', 'cover'), [
-    { id: 'plate', redactionAction: 'cover', resolved: false },
+  ], 'plate', 'blur'), [
+    { id: 'plate', redactionAction: 'blur', resolved: false },
   ]);
 });
 

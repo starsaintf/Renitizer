@@ -84,16 +84,32 @@ test('validates metadata-only job creation requests', () => {
   } });
 });
 
-test('accepts only bounded cover tracks for a video redaction job', () => {
+test('accepts only bounded blur or cover tracks for a video redaction job', () => {
   const result = validateJobRequest({
     kind: 'video-redaction', mediaKind: 'video', fileName: 'street.mp4', mimeType: 'video/mp4', sizeBytes: 2048,
-    redactions: [{ id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+    redactions: [
+      { id: 'plate', action: 'blur', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } },
+      { id: 'face', action: 'cover', startTime: 3, endTime: 4, box: { x: 0.5, y: 0.1, width: 0.2, height: 0.3 } },
+    ],
   });
   assert.deepEqual(result, { valid: true, value: {
     kind: 'video-redaction', mediaKind: 'video', fileName: 'street.mp4', mimeType: 'video/mp4', sizeBytes: 2048,
-    redactions: [{ id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+    redactions: [
+      { id: 'plate', action: 'blur', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } },
+      { id: 'face', action: 'cover', startTime: 3, endTime: 4, box: { x: 0.5, y: 0.1, width: 0.2, height: 0.3 } },
+    ],
   } });
   assert.equal(outputObjectKey({ ownerAccountId: 'acct_renvoy_alice', jobId: 'job-123' }), 'jobs/acct_renvoy_alice/job-123/output.mp4');
+});
+
+test('tells callers that video redactions support blur and cover', () => {
+  const result = validateJobRequest({
+    kind: 'video-redaction', mediaKind: 'video', fileName: 'street.mp4', mimeType: 'video/mp4', sizeBytes: 2048,
+    redactions: [{ id: 'plate', action: 'keep', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }],
+  });
+
+  assert.equal(result.valid, false);
+  assert.match(result.error, /blur or cover/i);
 });
 
 test('creates account-scoped R2 input keys without using an unsafe source filename', () => {

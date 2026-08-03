@@ -48,7 +48,7 @@ export function validateJobRequest(input) {
   }
   const normalizedRedactions = normalizeRendererTracks(input.redactions);
   if (kind === 'video-redaction' && (!Array.isArray(input.redactions) || !normalizedRedactions.length || normalizedRedactions.length !== input.redactions.length)) {
-    errors.push('video-redaction jobs require valid cover redaction tracks.');
+    errors.push('video-redaction jobs require valid blur or cover redaction tracks.');
   }
   if (input.redactions !== undefined && kind !== 'video-redaction') errors.push('redactions are only supported for video-redaction jobs.');
   if (input.fileName !== undefined && (!isString(input.fileName) || !input.fileName.trim() || input.fileName.length > 255)) {

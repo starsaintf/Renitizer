@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCoverFilter, normalizeRendererTracks } from '../filter.mjs';
+import { buildCoverFilter, buildVideoFilterGraph, normalizeRendererTracks } from '../filter.mjs';
 
 test('normalizes only bounded cover tracks with a real time span', () => {
   assert.deepEqual(normalizeRendererTracks([
@@ -9,6 +9,20 @@ test('normalizes only bounded cover tracks with a real time span', () => {
   ]), [{
     id: 'plate', action: 'cover', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
   }]);
+});
+
+test('keeps a bounded blur track and creates a private blur overlay graph', () => {
+  const tracks = normalizeRendererTracks([
+    { id: 'plate', action: 'blur', startTime: 1, endTime: 3, box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } },
+  ]);
+
+  assert.equal(tracks[0]?.action, 'blur');
+  const graph = buildVideoFilterGraph(tracks);
+  assert.match(graph.filterComplex, /boxblur/);
+  assert.match(graph.filterComplex, /overlay=/);
+  assert.match(graph.filterComplex, /between\(t\\,1\\,3\)/);
+  assert.equal(graph.outputLabel, '[renitized]');
+  assert.equal(graph.filterComplex.includes('plate'), false);
 });
 
 test('builds a fixed time-bounded FFmpeg cover filter without source labels or filenames', () => {
