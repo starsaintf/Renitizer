@@ -87,6 +87,10 @@ test('verifies unsigned Android, iOS simulator, and desktop foundations in CI', 
   assert.match(workflow, /xcodebuild -project App\.xcodeproj/);
   assert.doesNotMatch(workflow, /-workspace App\.xcworkspace/);
   assert.match(workflow, /CODE_SIGNING_ALLOWED=NO/);
+  assert.match(
+    workflow,
+    /desktop-windows-check:[\s\S]*?npm run build:native-web[\s\S]*?cargo check --manifest-path src-tauri\/Cargo\.toml/,
+  );
   assert.match(workflow, /cargo check --manifest-path src-tauri\/Cargo\.toml/);
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /macos-latest/);
