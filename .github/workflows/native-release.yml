@@ -28,7 +28,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm run native:sync
+      - run: npm run build:native-web
+      - run: npx --no-install cap sync android
       - run: node --test test/*.test.js worker/test/*.test.js processor/video/test/filter.test.mjs processor/document/test_contract.mjs
 
   android:
@@ -54,7 +55,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - run: npm ci --no-audit --no-fund
-      - run: npm run native:sync
+      - run: npm run build:native-web
+      - run: npx --no-install cap sync android
       - name: Decode Android signing key
         shell: bash
         run: |
@@ -65,7 +67,9 @@ jobs:
           test -s "$RENITIZER_RELEASE_STORE_FILE"
       - name: Build signed Android app bundle
         working-directory: android
-        run: ./gradlew bundleRelease --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
       - name: Verify Android app-bundle signature
         working-directory: android
         run: jarsigner -verify -strict -certs app/build/outputs/bundle/release/app-release.aab
@@ -93,7 +97,6 @@ jobs:
       IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
       IOS_SIGNING_IDENTITY: ${{ secrets.IOS_SIGNING_IDENTITY }}
       IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}
-      IOS_EXPORT_OPTIONS_PATH: ${{ runner.temp }}/renitizer-ios/ExportOptions.plist
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -101,7 +104,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm run native:sync
+      - run: npm run build:native-web
+      - run: npx --no-install cap sync ios
       - name: Import iOS signing material
         shell: bash
         run: |
@@ -121,9 +125,10 @@ jobs:
       - name: Archive and export signed iOS app
         shell: bash
         run: |
+          export IOS_EXPORT_OPTIONS_PATH="$RUNNER_TEMP/renitizer-ios/ExportOptions.plist"
           node scripts/create-ios-export-options.mjs
           cd ios/App
-          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/renitizer-ios/Renitizer.xcarchive" archive CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$IOS_TEAM_ID" CODE_SIGN_IDENTITY="$IOS_SIGNING_IDENTITY" PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME"
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/renitizer-ios/Renitizer.xcarchive" archive CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$IOS_TEAM_ID" CODE_SIGN_IDENTITY="$IOS_SIGNING_IDENTITY" PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_NAME"
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/renitizer-ios/Renitizer.xcarchive" -exportPath "$RUNNER_TEMP/renitizer-ios/export" -exportOptionsPlist "$IOS_EXPORT_OPTIONS_PATH"
       - uses: actions/upload-artifact@v4
         with:

@@ -46,6 +46,7 @@ test('includes a Tauri desktop project foundation', async () => {
   await fs.access(new URL('../src-tauri/src/main.rs', import.meta.url));
   await fs.access(new URL('../src-tauri/tauri.conf.json', import.meta.url));
   await fs.access(new URL('../src-tauri/sign-windows.ps1', import.meta.url));
+  await fs.access(new URL('../src-tauri/icons/icon.ico', import.meta.url));
   assert.match(tauriConfig.bundle.windows.signCommand, /sign-windows\.ps1/);
 });
 
@@ -60,8 +61,11 @@ test('declares an approval-gated native release pipeline with real signing input
   assert.match(workflow, /APPLE_PROVISIONING_PROFILE_BASE64/);
   assert.match(workflow, /WINDOWS_CERTIFICATE_BASE64/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.doesNotMatch(workflow, /npm run native:sync/);
+  assert.doesNotMatch(workflow, /IOS_EXPORT_OPTIONS_PATH:\s*\$\{\{\s*runner\.temp\s*\}\}/);
+  assert.match(workflow, /export IOS_EXPORT_OPTIONS_PATH="\$RUNNER_TEMP\/renitizer-ios\/ExportOptions\.plist"/);
   assert.match(workflow, /gradlew bundleRelease/);
-  assert.match(workflow, /xcodebuild\s+-workspace[\s\S]*?\sarchive/);
+  assert.match(workflow, /xcodebuild\s+-project[\s\S]*?\sarchive/);
   assert.match(workflow, /tauri build/);
   assert.match(androidBuild, /RENITIZER_RELEASE_STORE_FILE/);
   assert.match(androidBuild, /signingConfigs/);
@@ -78,8 +82,10 @@ test('verifies unsigned Android, iOS simulator, and desktop foundations in CI', 
   const workflow = await fs.readFile(new URL('../.github/workflows/native-verify.yml', import.meta.url), 'utf8');
 
   assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /chmod \+x gradlew/);
   assert.match(workflow, /gradlew assembleDebug/);
-  assert.match(workflow, /xcodebuild -workspace App\.xcworkspace/);
+  assert.match(workflow, /xcodebuild -project App\.xcodeproj/);
+  assert.doesNotMatch(workflow, /-workspace App\.xcworkspace/);
   assert.match(workflow, /CODE_SIGNING_ALLOWED=NO/);
   assert.match(workflow, /cargo check --manifest-path src-tauri\/Cargo\.toml/);
   assert.match(workflow, /windows-latest/);

@@ -49,7 +49,9 @@ jobs:
       - run: npx --no-install cap sync android
       - name: Compile debug app
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
   ios-simulator:
     name: iOS simulator build
@@ -66,7 +68,7 @@ jobs:
       - run: npx --no-install cap sync ios
       - name: Compile iOS simulator app without signing
         working-directory: ios/App
-        run: xcodebuild -workspace App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
 
   desktop-windows-check:
     name: Windows desktop Rust check
