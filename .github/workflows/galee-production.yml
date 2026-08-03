@@ -110,5 +110,6 @@ jobs:
             RENVOY_IDENTITY_VERIFICATION_URL: process.env.RENVOY_IDENTITY_VERIFICATION_URL,
           }));
           NODE
+          node scripts/verify-processors.mjs
           wrangler secret bulk .worker-secrets.json --config wrangler.toml
           wrangler deploy --config wrangler.toml
