@@ -157,6 +157,19 @@ test('createVerification represents supplied provider assessments without claimi
   assert.equal(verification.checks.reverseImage.status, 'not-assessed');
 });
 
+test('createVerification requires review when an opted-in clean-copy cloud recheck cannot run', () => {
+  const verification = createVerification({
+    assessedChecks: ['metadata', 'visibleText', 'barcodes'],
+    requiredProviderChecks: ['cloud'],
+  });
+
+  assert.equal(verification.readiness.state, 'review-needed');
+  assert.deepEqual(verification.checks.cloud, {
+    status: 'review-needed',
+    reason: 'Cloud assessment could not be checked again on the clean copy.',
+  });
+});
+
 test('boundedSafetyScore is bounded even for malformed or severe residual risks', () => {
   assert.equal(boundedSafetyScore([]), 100);
   assert.equal(boundedSafetyScore([finding({ severity: 'critical', confidence: 99 })]), 58);

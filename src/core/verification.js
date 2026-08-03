@@ -45,6 +45,7 @@ export function createVerification({
   assessedChecks = [],
   redactionPlan = [],
   providerResults = {},
+  requiredProviderChecks = [],
 } = {}) {
   const residualRisks = deriveResidualRisks({ beforeFindings, afterFindings, assessedChecks, redactionPlan });
   const checks = {
@@ -53,9 +54,9 @@ export function createVerification({
     barcodes: localCheckResult('barcodes', afterFindings, assessedChecks),
     faces: localCheckResult('faces', afterFindings, assessedChecks),
     visualRedactions: visualRedactionResult(beforeFindings, redactionPlan),
-    cloud: providerCheckResult('cloud', providerResults.cloud, afterFindings),
-    faceLandmarks: providerCheckResult('faceLandmarks', providerResults.faceLandmarks, afterFindings),
-    reverseImage: providerCheckResult('reverseImage', providerResults.reverseImage, afterFindings),
+    cloud: providerCheckResult('cloud', providerResults.cloud, afterFindings, requiredProviderChecks.includes('cloud')),
+    faceLandmarks: providerCheckResult('faceLandmarks', providerResults.faceLandmarks, afterFindings, requiredProviderChecks.includes('faceLandmarks')),
+    reverseImage: providerCheckResult('reverseImage', providerResults.reverseImage, afterFindings, requiredProviderChecks.includes('reverseImage')),
   };
   const needsReview = residualRisks.length > 0 || Object.values(checks).some((check) => check.status === 'review-needed');
 
@@ -88,14 +89,16 @@ function visualRedactionResult(beforeFindings, redactionPlan) {
   return { status: 'passed', reason: 'All marked visible items were selected for blur, cover, or crop.' };
 }
 
-function providerCheckResult(key, provided, afterFindings) {
+function providerCheckResult(key, provided, afterFindings, required = false) {
   const descriptors = {
     cloud: ['cloud assessment', 'No cloud assessment result was supplied for the clean copy.', (finding) => finding.source === 'cloud'],
     faceLandmarks: ['face or landmark', 'No face or landmark provider result was supplied for the clean copy.', (finding) => ['face', 'landmark'].includes(finding.category)],
     reverseImage: ['reverse-image or OSINT', 'No reverse-image or OSINT provider result was supplied for the clean copy.', (finding) => ['reverse-image', 'osint'].includes(finding.category)],
   };
   const [label, missingReason, matches] = descriptors[key];
-  if (!provided) return { status: 'not-assessed', reason: missingReason };
+  if (!provided) return required
+    ? { status: 'review-needed', reason: `${label[0].toUpperCase()}${label.slice(1)} could not be checked again on the clean copy.` }
+    : { status: 'not-assessed', reason: missingReason };
   const risks = afterFindings.filter((finding) => !finding.resolved && matches(finding));
   return risks.length
     ? { status: 'review-needed', reason: `${label[0].toUpperCase()}${label.slice(1)} assessment found ${risks.length} item${risks.length === 1 ? '' : 's'}.` }

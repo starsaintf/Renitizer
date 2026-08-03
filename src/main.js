@@ -11,6 +11,7 @@ import { getAudioProcessingState, getAudioReviewItems, inspectAudioFile, resolve
 import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
+import { recheckCleanImage } from './core/clean-copy-cloud-recheck.js';
 import { getViewFromHash } from './core/view-state.js';
 import { findingStatus, friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
@@ -233,9 +234,26 @@ async function cleanImage() {
     state.share = null;
     state.findings = markRedactionsResolved(state.findings.map((finding) => finding.id.startsWith('metadata-') ? { ...finding, resolved: true } : finding), redactionPlan);
     const postClean = await rerunCleanScanners(state.cleanFile, state.availableChecks);
-    state.verification = createVerification({ beforeFindings, afterFindings: postClean.findings, assessedChecks: postClean.assessedChecks, redactionPlan });
+    const cloudRecheck = await recheckCleanImage({
+      file: state.cleanFile,
+      endpoint: ui['cloud-endpoint'].value,
+      consent: ui['cloud-consent'].checked,
+      requestCloudAnalysis,
+    });
+    state.verification = createVerification({
+      beforeFindings,
+      afterFindings: [...postClean.findings, ...cloudRecheck.findings],
+      assessedChecks: postClean.assessedChecks,
+      redactionPlan,
+      providerResults: cloudRecheck.providerResults,
+      requiredProviderChecks: cloudRecheck.requiredProviderChecks,
+    });
     ui['clean-status'].textContent = state.verification.readiness.label;
-    ui['sanitize-note'].textContent = state.verification.readiness.label;
+    ui['sanitize-note'].textContent = cloudRecheck.failed
+      ? 'Your clean copy was made, but the extra clean-copy check could not finish. Review it before sharing.'
+      : cloudRecheck.attempted
+        ? `${state.verification.readiness.label}. Your clean copy was checked again by the service you chose.`
+        : state.verification.readiness.label;
     ui['download-button'].disabled = false;
     state.receiptReady = true;
     updateReport();
