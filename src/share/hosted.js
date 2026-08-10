@@ -1,6 +1,21 @@
 const ACCOUNT_ID = /^acct_[A-Za-z0-9_-]{2,120}$/;
 const SHARE_ID = /^share_[A-Za-z0-9_-]{8,128}$/;
 
+export function isHostedShareId(value) {
+  return SHARE_ID.test(String(value || ''));
+}
+
+export function createHostedShareLink({ currentUrl, shareId } = {}) {
+  if (!isHostedShareId(shareId)) throw new Error('A valid Renvoy share ID is required.');
+  let url;
+  try { url = new URL(currentUrl); }
+  catch { throw new Error('A valid Renitizer address is required.'); }
+  url.search = '';
+  url.searchParams.set('share', shareId);
+  url.hash = '#decrypt';
+  return url.href;
+}
+
 export async function createHostedShare({ session, envelope, recipientAccountId, expiresAt, fetcher = fetch, FileCtor = File, now = () => Date.now() } = {}) {
   const endpoint = trustedEndpoint(session);
   if (!ACCOUNT_ID.test(String(recipientAccountId || ''))) throw new Error('Choose a valid recipient Renvoy account.');
@@ -17,13 +32,13 @@ export async function createHostedShare({ session, envelope, recipientAccountId,
   const response = await fetcher(`${endpoint}/api/shares`, { method: 'POST', headers: { Authorization: `Renvoy ${session.capability}` }, body: form });
   if (!response.ok) throw new Error('The encrypted package could not be sent through Renvoy.');
   const payload = await response.json();
-  if (!SHARE_ID.test(String(payload?.share?.id || ''))) throw new Error('Renvoy did not confirm the encrypted share.');
+  if (!isHostedShareId(payload?.share?.id)) throw new Error('Renvoy did not confirm the encrypted share.');
   return payload;
 }
 
 export async function downloadHostedShare({ session, shareId, fetcher = fetch } = {}) {
   const endpoint = trustedEndpoint(session);
-  if (!SHARE_ID.test(String(shareId || ''))) throw new Error('Enter a valid Renvoy share ID.');
+  if (!isHostedShareId(shareId)) throw new Error('Enter a valid Renvoy share ID.');
   const response = await fetcher(`${endpoint}/api/shares/${shareId}`, { headers: { Authorization: `Renvoy ${session.capability}` } });
   if (!response.ok) throw new Error('This encrypted share is unavailable.');
   return response.blob();
@@ -31,7 +46,7 @@ export async function downloadHostedShare({ session, shareId, fetcher = fetch } 
 
 export async function revokeHostedShare({ session, shareId, fetcher = fetch } = {}) {
   const endpoint = trustedEndpoint(session);
-  if (!SHARE_ID.test(String(shareId || ''))) throw new Error('This Renvoy share is invalid.');
+  if (!isHostedShareId(shareId)) throw new Error('This Renvoy share is invalid.');
   const response = await fetcher(`${endpoint}/api/shares/${shareId}`, { method: 'DELETE', headers: { Authorization: `Renvoy ${session.capability}` } });
   if (!response.ok) throw new Error('This encrypted share could not be revoked.');
 }

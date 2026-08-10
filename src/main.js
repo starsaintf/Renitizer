@@ -17,7 +17,7 @@ import { findingStatus, friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
-import { createHostedShare, downloadHostedShare, revokeHostedShare } from './share/hosted.js';
+import { createHostedShare, createHostedShareLink, downloadHostedShare, isHostedShareId, revokeHostedShare } from './share/hosted.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile, setDocumentPlanAction } from './documents/policy.js';
 import { documentReadyCopy, documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
@@ -27,10 +27,12 @@ import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'video-coverage-option', 'video-check-coverage', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'video-coverage-option', 'video-check-coverage', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-link-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
 const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
+const shareFromQuery = new URLSearchParams(location.search).get('share');
+if (isHostedShareId(shareFromQuery)) ui['receive-share-id'].value = shareFromQuery;
 
 ui['file-input'].addEventListener('change', () => { void selectFile(ui['file-input'].files[0]); });
 ui['scan-button'].addEventListener('click', localScan);
@@ -50,6 +52,7 @@ ui['share-package-button'].addEventListener('click', createEncryptedPackage);
 ui['share-key-button'].addEventListener('click', downloadRecoveryKey);
 ui['share-report-button'].addEventListener('click', downloadShareReport);
 ui['share-hosted-button'].addEventListener('click', createHostedEncryptedShare);
+ui['share-link-button'].addEventListener('click', copyCurrentShareLink);
 ui['share-revoke-button'].addEventListener('click', revokeCurrentHostedShare);
 ui['share-recipient-account'].addEventListener('input', () => { state.hostedShare = null; renderShareSection(); });
 ui['receive-hosted-button'].addEventListener('click', downloadIncomingHostedShare);
@@ -811,6 +814,8 @@ function renderShareSection() {
   if (!state.share) ui['share-status'].textContent = '';
   ui['share-hosted-details'].hidden = !state.share;
   ui['share-hosted-button'].disabled = !state.share || !state.recoveryKeySaved;
+  ui['share-link-button'].hidden = !state.hostedShare?.shareLink;
+  ui['share-link-button'].disabled = !state.hostedShare?.shareLink;
   ui['share-revoke-button'].hidden = !state.hostedShare;
   ui['share-revoke-button'].disabled = !state.hostedShare;
   if (!state.share) ui['share-hosted-status'].textContent = '';
@@ -862,11 +867,23 @@ async function createHostedEncryptedShare() {
     const session = await requestRenvoySession();
     if (!session.available) { ui['share-hosted-status'].textContent = 'Open Renitizer from Renvoy to send an encrypted package.'; return; }
     const result = await createHostedShare({ session, envelope: state.share.envelope, recipientAccountId, expiresAt: state.share.envelope.expiresAt });
-    state.hostedShare = { session, ...result.share };
-    ui['share-hosted-status'].textContent = `Sent privately. Share ID: ${result.share.id}. Send the recovery key separately.`;
+    state.hostedShare = { session, ...result.share, shareLink: createHostedShareLink({ currentUrl: location.href, shareId: result.share.id }) };
+    ui['share-hosted-status'].textContent = 'Sent privately. Copy the recipient link, then send the recovery key separately.';
   } catch {
     ui['share-hosted-status'].textContent = 'We could not send the encrypted package. Your original was not changed.';
   } finally { idle(ui['share-hosted-button'], 'Send encrypted package'); renderShareSection(); }
+}
+
+async function copyCurrentShareLink() {
+  const link = state.hostedShare?.shareLink;
+  if (!link) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(link);
+    ui['share-hosted-status'].textContent = 'Recipient link copied. Send the recovery key separately.';
+  } catch {
+    ui['share-hosted-status'].textContent = `Copy this recipient link: ${link} Send the recovery key separately.`;
+  }
 }
 async function revokeCurrentHostedShare() {
   if (!state.hostedShare) return;
