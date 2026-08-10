@@ -60,17 +60,17 @@ Document-cleaning jobs use `kind: "document-cleaning"`, `documentType` (`pdf` or
 
 ### Video renderer
 
-`processor/video` is a deployable FFmpeg service for actual video cover redaction. A `video-redaction` job accepts normalized, non-empty, time-bounded `cover` tracks; the Worker streams the private R2 input to the service, stores its MP4 response in R2, then enables the owner-only `GET /api/jobs/:id/output` download. Set `PROCESSOR_URL` only in the Worker environment and `PROCESSOR_AUTH_TOKEN` only as a Worker/container secret. The first renderer intentionally supports solid cover boxes—the safest redaction mode—rather than silently substituting a weaker effect for a requested blur.
+`processor/video` is a deployable FFmpeg service for actual video blur and cover redaction. A `video-redaction` job accepts normalized, non-empty, time-bounded `blur` or `cover` tracks; the Worker streams the private R2 input to the service, stores its MP4 response in R2, then enables the owner-only `GET /api/jobs/:id/output` download. Cover is the strongest visual block; blur keeps more scene context and should be reviewed before sharing. Set `PROCESSOR_URL` only in the Worker environment and `PROCESSOR_AUTH_TOKEN` only as a Worker/container secret.
 
 The production workflow builds both processor images to GHCR as `renitizer-video` and `renitizer-document`, tagged with `latest` and the commit SHA, after its production gate. Set each resulting GitHub Container Registry package to **private** in GitHub Packages and deploy it to a private container host before adding the processor URLs and shared token to the Worker.
 
 For the Galee-Labs production workflow, add these GitHub Environment `production` secrets before running it: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `OPENAI_API_KEY`, `PROCESSOR_AUTH_TOKEN`, `VIDEO_PROCESSOR_URL`, `DOCUMENT_PROCESSOR_URL`, and `RENVOY_IDENTITY_VERIFICATION_URL`. The workflow refuses to deploy the full Worker when any are absent. Starsaintf deliberately uses its separate local-only Worker workflow and does not receive Renvoy or processor secrets.
 
-`GOOGLE_CLOUD_VISION_API_KEY` is optional. When it is configured, a person can explicitly request a clean-copy Web-match and landmark check. The Worker sends only that clean image to the provider and returns only risk signals—not landmark names, matching pages, or external URLs. Without this optional secret, the receipt correctly marks those checks as not assessed.
+`GOOGLE_CLOUD_VISION_API_KEY` is optional. When it is configured, a person can explicitly request a clean-copy Web-match and landmark check. The Worker sends only the clean image—or sampled frames from a finished clean video—to the provider and returns only risk signals, not landmark names, matching pages, or external URLs. Without this optional secret, the receipt correctly marks those checks as not assessed.
 
 ## Native wrappers
 
-- Capacitor: install Capacitor in a wrapper project, point it at this checkout's static web directory (`webDir: "."`), then add Android/iOS platforms. `capacitor.config.json` provides the app identity.
-- Tauri: create a standard Tauri shell and use `tauri.conf.json` as the starting configuration. Its `frontendDist` points one directory above the Tauri wrapper, so keep the wrapper in a sibling `src-tauri/` directory or adjust the path.
+- Capacitor: `npm run build:native-web` produces the static `native-web/` directory used by the included Android and iOS projects. `capacitor.config.json` provides the app identity.
+- Tauri: the included desktop shell uses the same `native-web/` output through `src-tauri/tauri.conf.json`.
 
 No native binaries or credentials are included.
