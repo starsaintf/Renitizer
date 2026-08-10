@@ -32,3 +32,10 @@ test('public Starsaintf workflow does not run in the Galee-Labs repository', asy
 
   assert.match(workflow, /if:\s*github\.repository_owner == 'starsaintf'/);
 });
+
+test('public Pages deploy publishes only the built static web bundle', async () => {
+  const workflow = await fs.readFile(new URL('../.github/workflows/production.yml', import.meta.url), 'utf8');
+
+  assert.match(workflow, /pages:[\s\S]*?actions\/setup-node@v4[\s\S]*?node scripts\/build-native-web\.mjs[\s\S]*?actions\/upload-pages-artifact@v3[\s\S]*?path: native-web/);
+  assert.doesNotMatch(workflow, /actions\/upload-pages-artifact@v3[\s\S]*?path: \./);
+});
