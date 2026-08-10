@@ -14,12 +14,24 @@ export function validateShareExpiry(option, now = new Date()) {
   };
 }
 
-export function getShareState({ hasCleanCopy, expiry, now = new Date() }) {
+export function getShareState({ hasCleanCopy, expiry, verification = null, requiresVerification = false, now = new Date() }) {
   if (!hasCleanCopy) return {
     state: 'not-ready',
     available: false,
     delivery: 'unconfigured',
     message: 'Make a clean copy before preparing an encrypted package.',
+  };
+  if (verification?.readiness?.state === 'review-needed') return {
+    state: 'review-needed',
+    available: false,
+    delivery: 'unconfigured',
+    message: 'Review the remaining private details before preparing an encrypted package.',
+  };
+  if (requiresVerification && verification?.readiness?.state !== 'ready') return {
+    state: 'needs-verification',
+    available: false,
+    delivery: 'unconfigured',
+    message: 'Check the finished video again before preparing an encrypted package.',
   };
   const expiryResult = validateShareExpiry(expiry, now);
   if (!expiryResult.valid) return { state: 'invalid', available: false, delivery: 'unconfigured', message: expiryResult.error };

@@ -800,7 +800,7 @@ async function downloadCleanCopy() {
 function downloadReport() { downloadPrivacyReport({ includeDetailedFindings: false }); }
 function downloadReceipt() { if (state.receipt) download(new Blob([JSON.stringify(state.receipt, null, 2)], { type: 'application/json' }), 'renitizer-cleaning-receipt.json', 'application/json'); }
 function getCurrentShareableOutput() { return getShareableCleanOutput({ cleanFile: state.cleanFile, remoteVideo: state.remoteVideo, remoteDocument: state.remoteDocument }); }
-function getCurrentShareState() { return getShareState({ hasCleanCopy: Boolean(getCurrentShareableOutput()), expiry: ui['share-expiry'].value }); }
+function getCurrentShareState() { return getShareState({ hasCleanCopy: Boolean(getCurrentShareableOutput()), expiry: ui['share-expiry'].value, verification: state.verification, requiresVerification: Boolean(state.remoteVideo?.ready) }); }
 async function resolveCurrentShareableOutput() { return resolveShareableCleanOutput({ cleanFile: state.cleanFile, remoteVideo: state.remoteVideo, remoteDocument: state.remoteDocument, downloadRemoteJob }); }
 function resetSharePackage() {
   state.share = null;
@@ -813,7 +813,7 @@ function renderShareSection() {
   ui['share-section'].hidden = !getCurrentShareableOutput();
   ui['share-package-button'].disabled = !shareState.available;
   ui['share-key-button'].disabled = !state.share;
-  ui['share-report-button'].disabled = !shareState.available;
+  ui['share-report-button'].disabled = !getCurrentShareableOutput();
   ui['share-delivery'].textContent = shareState.message;
   ui['archive-original-button'].disabled = !state.file;
   ui['archive-original-key-button'].disabled = !state.originalArchive;

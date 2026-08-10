@@ -33,6 +33,32 @@ test('getShareState offers only a local encrypted package when a clean copy exis
   });
 });
 
+test('getShareState keeps an encrypted package unavailable when risks remain or a finished video has not been checked', () => {
+  assert.deepEqual(getShareState({
+    hasCleanCopy: true,
+    expiry: '7-days',
+    verification: { readiness: { state: 'review-needed' } },
+    now,
+  }), {
+    state: 'review-needed',
+    available: false,
+    delivery: 'unconfigured',
+    message: 'Review the remaining private details before preparing an encrypted package.',
+  });
+
+  assert.deepEqual(getShareState({
+    hasCleanCopy: true,
+    expiry: '7-days',
+    requiresVerification: true,
+    now,
+  }), {
+    state: 'needs-verification',
+    available: false,
+    delivery: 'unconfigured',
+    message: 'Check the finished video again before preparing an encrypted package.',
+  });
+});
+
 test('createSafeShareReport excludes source name and raw findings unless detailed findings are explicitly included', () => {
   const input = {
     originalFileName: 'passport-and-address.jpg',

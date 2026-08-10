@@ -10,6 +10,7 @@ test('the workspace lets a completed private output enter local encrypted sharin
 
   assert.match(app, /import \{ createGenericOriginalArchiveFile, createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput \} from '\.\/share\/remote-output\.js';/);
   assert.match(app, /getShareableCleanOutput\(\{ cleanFile: state\.cleanFile, remoteVideo: state\.remoteVideo, remoteDocument: state\.remoteDocument \}\)/);
+  assert.match(app, /getShareState\(\{ hasCleanCopy: Boolean\(getCurrentShareableOutput\(\)\), expiry: ui\['share-expiry'\]\.value, verification: state\.verification, requiresVerification: Boolean\(state\.remoteVideo\?\.ready\) \}\)/);
   assert.match(app, /resolveShareableCleanOutput\(\{ cleanFile: state\.cleanFile, remoteVideo: state\.remoteVideo, remoteDocument: state\.remoteDocument, downloadRemoteJob \}\)/);
   assert.match(app, /encryptCleanCopy\(createGenericPackageFile\(cleanOutput\),/);
   assert.match(page, /id="archive-original-button"/);
