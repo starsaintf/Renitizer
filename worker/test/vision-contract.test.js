@@ -27,5 +27,10 @@ test('asks cloud vision to classify visible clues without claiming an OSINT matc
   assert.match(prompt, /vehicle-plate/i);
   assert.match(prompt, /street-sign/i);
   assert.match(prompt, /not a reverse-image, identity, or location match/i);
-  assert.deepEqual(category.enum, ['face', 'address', 'email', 'phone', 'qr', 'barcode', 'id-card', 'screen', 'vehicle-plate', 'street-sign', 'map', 'landmark', 'route-display', 'dashboard-gps', 'location-clue']);
+  assert.deepEqual(category.enum, [
+    'face', 'address', 'email', 'phone', 'qr', 'barcode', 'id-card', 'screen',
+    'vehicle-plate', 'street-sign', 'map', 'landmark', 'route-display', 'dashboard-gps', 'location-clue',
+    'reflection', 'tattoo', 'birthmark', 'school-uniform', 'company-logo', 'passport', 'bank-card',
+    'mail-label', 'shipping-label', 'key', 'wifi-ssid', 'calendar-event', 'watch-display', 'boarding-pass',
+  ]);
 });

@@ -68,6 +68,17 @@ test('groupSignals includes cloud visual location and identity clues without tre
   assert.deepEqual(signals.reverseImage, []);
 });
 
+test('groupSignals includes new visual privacy clues in the relevant exposure signals', () => {
+  const wifi = { category: 'wifi-ssid' };
+  const tattoo = { category: 'tattoo' };
+  const reflection = { category: 'reflection' };
+
+  const signals = groupSignals([wifi, tattoo, reflection]);
+
+  assert.deepEqual(signals.location, [wifi, reflection]);
+  assert.deepEqual(signals.identity, [tattoo, reflection]);
+});
+
 test('makeReport exposes unresolved residual risks and finding counts', () => {
   const openRisk = { id: 'address', category: 'address', severity: 'high', confidence: 1, resolved: false };
   const fixedRisk = { id: 'camera', category: 'device', severity: 'medium', confidence: 1, resolved: true };

@@ -23,6 +23,17 @@ test('explains a cloud screen without exposing technical categories', () => {
   });
 });
 
+test('explains personal visual clues in plain language', () => {
+  assert.deepEqual(friendlyFinding({ id: 'cloud-tattoo', category: 'tattoo' }), {
+    title: 'A distinctive personal detail may be visible',
+    detail: 'A tattoo or similar detail can make someone easier to recognise.',
+  });
+  assert.deepEqual(friendlyFinding({ id: 'cloud-wifi', category: 'wifi-ssid' }), {
+    title: 'A network name may be visible',
+    detail: 'A Wi-Fi name can reveal a home, workplace, or nearby location.',
+  });
+});
+
 test('shows whether an image redaction is planned or has been applied', () => {
   assert.equal(findingStatus({ redactionAction: 'blur', resolved: false }), 'will be blurred in your clean copy');
   assert.equal(findingStatus({ redactionAction: 'cover', resolved: false }), 'will be covered in your clean copy');

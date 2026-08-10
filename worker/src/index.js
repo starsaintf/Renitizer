@@ -33,6 +33,8 @@ const localJobs = new Map();
 const visualFindingCategories = [
   'face', 'address', 'email', 'phone', 'qr', 'barcode', 'id-card', 'screen',
   'vehicle-plate', 'street-sign', 'map', 'landmark', 'route-display', 'dashboard-gps', 'location-clue',
+  'reflection', 'tattoo', 'birthmark', 'school-uniform', 'company-logo', 'passport', 'bank-card',
+  'mail-label', 'shipping-label', 'key', 'wifi-ssid', 'calendar-event', 'watch-display', 'boarding-pass',
 ];
 
 const findingSchema = {

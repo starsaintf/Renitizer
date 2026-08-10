@@ -4,8 +4,10 @@ const locationClueCategories = new Set([
 ]);
 
 const personalDocumentCategories = new Set([
-  'id-card', 'passport', 'bank-card', 'document', 'mail', 'shipping-label',
+  'id-card', 'passport', 'bank-card', 'document', 'mail', 'mail-label', 'shipping-label', 'boarding-pass',
 ]);
+
+const distinctivePersonalCategories = new Set(['tattoo', 'birthmark', 'school-uniform']);
 
 export function friendlyFinding(finding = {}) {
   const id = String(finding.id || '');
@@ -21,6 +23,12 @@ export function friendlyFinding(finding = {}) {
   if (category === 'vehicle-plate' || category === 'license-plate') return { title: 'A vehicle plate was found', detail: 'A plate can help link this image to a vehicle.' };
   if (locationClueCategories.has(category)) return { title: 'A location clue was found', detail: 'This image may reveal where it was taken.' };
   if (personalDocumentCategories.has(category)) return { title: 'A personal document may be visible', detail: 'Review it before you share this image.' };
+  if (distinctivePersonalCategories.has(category)) return { title: 'A distinctive personal detail may be visible', detail: 'A tattoo or similar detail can make someone easier to recognise.' };
+  if (category === 'reflection') return { title: 'A reflection may reveal private details', detail: 'A mirror, window, or glasses reflection can show more than the main image.' };
+  if (category === 'company-logo') return { title: 'An organisation clue may be visible', detail: 'A logo can reveal a workplace, school, or other connection.' };
+  if (category === 'wifi-ssid') return { title: 'A network name may be visible', detail: 'A Wi-Fi name can reveal a home, workplace, or nearby location.' };
+  if (category === 'calendar-event' || category === 'watch-display') return { title: 'A time or schedule detail may be visible', detail: 'A display can reveal when or where something is happening.' };
+  if (category === 'key') return { title: 'A key may be visible', detail: 'A key can reveal an access detail or a place connected to it.' };
   if (category === 'screen') return { title: 'A screen may show private information', detail: 'Review it before you share this image.' };
   if (id === 'document-processor-unavailable') return { title: 'Document check needs a processor', detail: 'This browser cannot inspect or clean the inside of this document without a configured processor.' };
   if (id.includes('unavailable')) return { title: 'One extra check was not available', detail: 'Your browser could not run every optional check.' };
