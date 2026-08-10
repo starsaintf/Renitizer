@@ -43,7 +43,7 @@ jobs:
           node-version: 22
       - name: Install Wrangler
         run: npm install --global wrangler@4
-      - name: Deploy Starsaintf local-only Worker
+      - name: Check Cloudflare deployment credentials
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -53,6 +53,11 @@ jobs:
             exit 1
           fi
           wrangler whoami
+      - name: Deploy Starsaintf local-only Worker
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
           wrangler deploy --config wrangler.starsaintf.toml
       - name: Remove Starsaintf Renvoy identity configuration
         working-directory: worker
