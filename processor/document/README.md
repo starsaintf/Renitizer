@@ -3,7 +3,7 @@
 This private service creates a transformed document; it does not return a successful response until the transformation exits successfully.
 
 - PDF: QPDF removes document info, metadata, page labels, the structure tree, interactive form dictionary, and flattens annotations into the rendered pages.
-- Modern Office Open XML (`.docx`, `.docm`, `.xlsx`, `.xlsm`, `.pptx`, `.pptm`, including templates and slideshows): removes document properties, comments, tracked revisions, signatures, thumbnails, embedded fonts, embedded objects, macros, and matching package relationships while preserving a clean Office package.
+- Modern Office Open XML (`.docx`, `.docm`, `.xlsx`, `.xlsm`, `.pptx`, `.pptm`, including templates and slideshows): removes document properties, comments, tracked revisions, signatures, thumbnails, embedded fonts, embedded objects, macros, external OOXML relationships, and matching package relationships while preserving a clean Office package.
 - Legacy Office, OpenDocument, and RTF (`.doc`, `.xls`, `.ppt`, `.odt`, `.ods`, `.odp`, `.rtf`): LibreOffice converts the file to PDF in headless mode; QPDF then sanitizes that PDF. The returned clean copy is intentionally a PDF rather than a modified legacy source file.
 
 Run it only behind the Renitizer Worker with a high-entropy `PROCESSOR_AUTH_TOKEN` shared by the two services:

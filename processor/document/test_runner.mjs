@@ -28,11 +28,11 @@ test('passes only the chosen modern Office categories to the package cleaner', a
   const result = await runDocumentSanitizer({
     documentType: 'office', sourceExtension: 'docx', inputPath: '/tmp/input.docx', outputPath: '/tmp/output.docx', officeScriptPath: '/app/office.py',
     requestedActions: ['remove-comment', 'remove-signature'],
-    execute: async (command, args) => { calls.push({ command, args }); return '{"removed":["comments","signatures"]}'; },
+    execute: async (command, args) => { calls.push({ command, args }); return '{"removed":["comments","external-links","signatures"]}'; },
   });
 
   assert.deepEqual(calls, [{ command: 'python3', args: ['/app/office.py', '/tmp/input.docx', '/tmp/output.docx', '--remove', 'comment', 'signature'] }]);
-  assert.deepEqual(result.removedCategories, ['comment', 'signature']);
+  assert.deepEqual(result.removedCategories, ['comment', 'hidden-object', 'signature']);
 });
 
 test('preserves every selectable Office category when the user chooses keep for all of them', async () => {

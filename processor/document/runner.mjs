@@ -15,7 +15,7 @@ const REQUESTED_CATEGORY_MAP = new Map([
 ]);
 const REMOVED_CATEGORY_MAP = new Map([
   ['document-properties', 'metadata'], ['comments', 'comment'], ['revisions', 'revision'],
-  ['embedded-objects', 'hidden-object'], ['signatures', 'signature'], ['thumbnails', 'thumbnail'], ['embedded-fonts', 'font'],
+  ['embedded-objects', 'hidden-object'], ['external-links', 'hidden-object'], ['signatures', 'signature'], ['thumbnails', 'thumbnail'], ['embedded-fonts', 'font'],
 ]);
 
 export function documentSanitizationPlan({ documentType, sourceExtension } = {}) {

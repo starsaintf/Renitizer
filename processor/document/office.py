@@ -16,7 +16,7 @@ CATEGORY_REASONS = {
     'metadata': {'document-properties'},
     'comment': {'comments'},
     'revision': {'revisions'},
-    'hidden-object': {'embedded-objects'},
+    'hidden-object': {'embedded-objects', 'external-links'},
     'signature': {'signatures'},
     'thumbnail': {'thumbnails'},
     'font': {'embedded-fonts'},
@@ -132,6 +132,8 @@ def _remove_private_relationships(content, selected_reasons):
 
 
 def _relationship_reason(relationship):
+    if str(relationship.attrib.get('TargetMode', '')).lower() == 'external':
+        return 'external-links'
     description = f"{relationship.attrib.get('Type', '')} {relationship.attrib.get('Target', '')}".lower()
     if any(token in description for token in ('comment', 'person', 'people')):
         return 'comments'

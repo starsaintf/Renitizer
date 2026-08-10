@@ -34,11 +34,12 @@ class OfficeSanitizerTests(unittest.TestCase):
                 archive.writestr('word/_rels/document.xml.rels', '''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
                   <Relationship Id="rKeep" Type="image" Target="media/image1.png"/>
                   <Relationship Id="rComment" Type="comments" Target="comments.xml"/>
+                  <Relationship Id="rExternal" Type="hyperlink" Target="https://private.example/profile" TargetMode="External"/>
                 </Relationships>''')
 
             result = sanitize_office(source, output)
 
-            self.assertEqual(result['removed'], ['comments', 'document-properties', 'embedded-fonts', 'embedded-objects', 'revisions', 'signatures', 'thumbnails'])
+            self.assertEqual(result['removed'], ['comments', 'document-properties', 'embedded-fonts', 'embedded-objects', 'external-links', 'revisions', 'signatures', 'thumbnails'])
             with zipfile.ZipFile(output) as archive:
                 names = set(archive.namelist())
                 self.assertIn('word/document.xml', names)
@@ -56,6 +57,7 @@ class OfficeSanitizerTests(unittest.TestCase):
                 relationships = archive.read('word/_rels/document.xml.rels').decode('utf-8')
                 self.assertIn('media/image1.png', relationships)
                 self.assertNotIn('comments.xml', relationships)
+                self.assertNotIn('private.example', relationships)
 
     def test_cli_writes_a_cleaned_office_package(self):
         with tempfile.TemporaryDirectory() as directory:
