@@ -21,6 +21,10 @@ export function friendlyFinding(finding = {}) {
   if (id.includes('ocr-phone') || category === 'phone') return { title: 'A phone number was found', detail: 'Writing in this image may include a phone number.' };
   if (id.includes('ocr-visual-address') || category === 'address') return { title: 'An address may be visible', detail: 'Writing in this image may include part of an address.' };
   if (category === 'vehicle-plate' || category === 'license-plate') return { title: 'A vehicle plate was found', detail: 'A plate can help link this image to a vehicle.' };
+  if (category === 'location-announcement' || category === 'place-mention') return { title: 'A location clue was heard', detail: 'An announcement or conversation may reveal where this was recorded.' };
+  if (category === 'company-mention') return { title: 'An organisation clue was heard', detail: 'A spoken name may reveal a workplace, school, or other connection.' };
+  if (category === 'school-mention') return { title: 'A school detail was heard', detail: 'A spoken school detail may identify a child or a location.' };
+  if (category === 'name-mention') return { title: 'A name was heard', detail: 'A spoken name may identify someone connected to this recording.' };
   if (locationClueCategories.has(category)) return { title: 'A location clue was found', detail: 'This image may reveal where it was taken.' };
   if (personalDocumentCategories.has(category)) return { title: 'A personal document may be visible', detail: 'Review it before you share this image.' };
   if (distinctivePersonalCategories.has(category)) return { title: 'A distinctive personal detail may be visible', detail: 'A tattoo or similar detail can make someone easier to recognise.' };

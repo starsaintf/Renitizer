@@ -37,6 +37,25 @@ const visualFindingCategories = [
   'mail-label', 'shipping-label', 'key', 'wifi-ssid', 'calendar-event', 'watch-display', 'boarding-pass',
 ];
 
+const audioContextCategories = ['location-announcement', 'place-mention', 'company-mention', 'school-mention', 'name-mention'];
+const audioContextDefinitions = {
+  'location-announcement': {
+    title: 'Location announcement in audio', detail: 'An announcement may reveal a station, airport, road, or other location.', severity: 'high',
+  },
+  'place-mention': {
+    title: 'Place name in audio', detail: 'A spoken place name may reveal where this was recorded or connected to.', severity: 'high',
+  },
+  'company-mention': {
+    title: 'Organisation name in audio', detail: 'A spoken organisation name may reveal a workplace, school, or other connection.', severity: 'medium',
+  },
+  'school-mention': {
+    title: 'School detail in audio', detail: 'A spoken school detail may identify a child or a location.', severity: 'high',
+  },
+  'name-mention': {
+    title: 'Name mentioned in audio', detail: 'A spoken name may identify someone connected to this recording.', severity: 'medium',
+  },
+};
+
 const findingSchema = {
   type: 'object', additionalProperties: false, required: ['findings'],
   properties: {
@@ -55,6 +74,24 @@ const findingSchema = {
               width: { type: 'number', minimum: 0, maximum: 1 }, height: { type: 'number', minimum: 0, maximum: 1 },
             },
           },
+        },
+      },
+    },
+  },
+};
+
+const audioContextSchema = {
+  type: 'object', additionalProperties: false, required: ['risks'],
+  properties: {
+    risks: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['category', 'startWord', 'endWord', 'confidence'],
+        properties: {
+          category: { type: 'string', enum: audioContextCategories },
+          startWord: { type: 'integer', minimum: 0 }, endWord: { type: 'integer', minimum: 0 },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
         },
       },
     },
@@ -591,7 +628,9 @@ async function transcribeAudio(file, env, analysisFetcher = fetch) {
   const upstream = await analysisFetcher('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body });
   if (!upstream.ok) return [unavailable('cloud-transcription-failed', 'Audio transcription provider request failed; local findings were retained.')];
   const payload = await upstream.json();
-  return transcriptFindings(payload.text || '', payload.words);
+  const localFindings = transcriptFindings(payload.text || '', payload.words);
+  const contextFindings = await analyzeAudioContext(payload.words, env, analysisFetcher);
+  return [...localFindings, ...contextFindings];
 }
 
 export function buildTimestampedTranscriptionBody(file) {
@@ -601,6 +640,67 @@ export function buildTimestampedTranscriptionBody(file) {
   body.append('response_format', 'verbose_json');
   body.append('timestamp_granularities[]', 'word');
   return body;
+}
+
+async function analyzeAudioContext(words, env, analysisFetcher) {
+  const timestampedWords = normalizedTimestampedWords(words);
+  if (!timestampedWords.length) return [unavailable('cloud-audio-context-timestamps-unavailable', 'The extra audio context check needs word timestamps before it can suggest a safe mute or bleep range.')];
+  const findings = [];
+  for (const { words: wordWindow, offset } of audioContextWindows(timestampedWords)) {
+    const upstream = await analysisFetcher('https://api.openai.com/v1/responses', {
+      method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildAudioContextRequest(wordWindow)),
+    });
+    if (!upstream.ok) return [...findings, unavailable('cloud-audio-context-failed', 'The extra audio context check could not finish. Review the audio before sharing.')];
+    const response = await upstream.json();
+    try { findings.push(...audioContextFindings(JSON.parse(response.output_text).risks, wordWindow, offset)); }
+    catch { return [...findings, unavailable('cloud-audio-context-unreadable', 'The extra audio context check did not return a usable result. Review the audio before sharing.')]; }
+  }
+  return findings;
+}
+
+export function buildAudioContextRequest(words = []) {
+  const indexedWords = words.map((word, index) => `${index}: ${word.text}`).join('\n');
+  return {
+    model: 'gpt-4.1-mini',
+    input: [{ role: 'user', content: [{ type: 'input_text', text: `Review these numbered words from one user-provided audio transcript for shareable privacy risks that simple email, phone, and address patterns can miss. Only use these categories: ${audioContextCategories.join(', ')}. Identify a risk only when the words give meaningful context, such as a station or airport announcement, a place name, a company, a school, or a person's name. Do not identify people, infer a precise location, quote any words, or report private values. Return the inclusive startWord and endWord indices for each risk so the person can mute or bleep that exact time range. Return no risk when uncertain.\n\nWords:\n${indexedWords}` }] }],
+    text: { format: { type: 'json_schema', name: 'audio_context_risks', strict: true, schema: audioContextSchema } },
+  };
+}
+
+export function audioContextFindings(risks, words, wordOffset = 0) {
+  if (!Array.isArray(risks) || !Array.isArray(words)) return [];
+  return risks.flatMap((risk) => {
+    const category = String(risk?.category || '');
+    const definition = audioContextDefinitions[category];
+    const startWord = Number(risk?.startWord);
+    const endWord = Number(risk?.endWord);
+    if (!definition || !Number.isInteger(startWord) || !Number.isInteger(endWord) || startWord < 0 || endWord < startWord || endWord >= words.length) return [];
+    const start = Number(words[startWord]?.start);
+    const end = Number(words[endWord]?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+    return [{
+      id: `audio-context-${category}-${wordOffset + startWord}-${wordOffset + endWord}`, category, ...definition,
+      confidence: boundedConfidence(risk.confidence), recommendation: 'Trim, mute, or replace this spoken detail before sharing.',
+      assessment: 'assessed', resolved: false, timeRange: { start, end }, redactionAction: 'keep',
+    }];
+  });
+}
+
+function normalizedTimestampedWords(words) {
+  if (!Array.isArray(words)) return [];
+  return words.flatMap((word) => {
+    const text = String(word?.word ?? word?.text ?? '').trim();
+    const start = Number(word?.start);
+    const end = Number(word?.end);
+    return text && Number.isFinite(start) && Number.isFinite(end) && end > start ? [{ text, start, end }] : [];
+  });
+}
+
+function audioContextWindows(words) {
+  const windows = [];
+  for (let offset = 0; offset < words.length; offset += 600) windows.push({ words: words.slice(offset, offset + 600), offset });
+  return windows;
 }
 
 function unavailable(id, detail) { return { id, category: 'capability', title: 'Cloud media boundary', detail, severity: 'low', confidence: 1, recommendation: 'Use a provider path configured for this media type.', assessment: 'unavailable', resolved: false }; }

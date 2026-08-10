@@ -34,6 +34,13 @@ test('explains personal visual clues in plain language', () => {
   });
 });
 
+test('explains a spoken location clue without showing the spoken words', () => {
+  assert.deepEqual(friendlyFinding({ id: 'audio-context-location-announcement-0-6', category: 'location-announcement' }), {
+    title: 'A location clue was heard',
+    detail: 'An announcement or conversation may reveal where this was recorded.',
+  });
+});
+
 test('shows whether an image redaction is planned or has been applied', () => {
   assert.equal(findingStatus({ redactionAction: 'blur', resolved: false }), 'will be blurred in your clean copy');
   assert.equal(findingStatus({ redactionAction: 'cover', resolved: false }), 'will be covered in your clean copy');
