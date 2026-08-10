@@ -1,6 +1,28 @@
 const DEFAULT_TARGET_SECONDS = 10;
 const DEFAULT_MAX_FRAMES = 24;
+const MAX_UPLOAD_FRAME_EDGE = 1280;
 const END_PADDING_SECONDS = 0.01;
+const SAMPLING_OPTIONS = Object.freeze({
+  standard: Object.freeze({ targetSeconds: DEFAULT_TARGET_SECONDS, maxFrames: DEFAULT_MAX_FRAMES }),
+  thorough: Object.freeze({ targetSeconds: 1, maxFrames: 180 }),
+});
+
+export function videoSamplingOptions(level = 'standard') {
+  return SAMPLING_OPTIONS[level] || SAMPLING_OPTIONS.standard;
+}
+
+export function videoFrameDimensions(width, height, maximumEdge = MAX_UPLOAD_FRAME_EDGE) {
+  const sourceWidth = positiveInteger(width);
+  const sourceHeight = positiveInteger(height);
+  const edge = positiveInteger(maximumEdge);
+  if (!sourceWidth || !sourceHeight || !edge) return null;
+
+  const scale = Math.min(1, edge / Math.max(sourceWidth, sourceHeight));
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+  };
+}
 
 export function buildVideoSampleTimes(duration, { targetSeconds = DEFAULT_TARGET_SECONDS, maxFrames = DEFAULT_MAX_FRAMES } = {}) {
   const playableDuration = positiveNumber(duration);

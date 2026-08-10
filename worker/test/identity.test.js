@@ -113,3 +113,30 @@ test('allows an authenticated Renvoy account to use the cloud analysis route', a
   assert.equal(providerRequest.url, 'https://api.openai.com/v1/responses');
   assert.equal(providerRequest.options.headers.Authorization, 'Bearer test-key');
 });
+
+test('bounds concurrent vision requests when a thorough video check sends many sampled frames', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const app = createWorker({
+    identityFetcher: async () => Response.json({ principal: { accountId: 'acct_renvoy_alice', deviceId: 'dev_phone', scopes: ['renitizer:use'] } }),
+    analysisFetcher: async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return Response.json({ output_text: JSON.stringify({ findings: [] }) });
+    },
+  });
+  const form = new FormData();
+  for (let index = 0; index < 10; index += 1) form.append('file', new File(['frame'], `frame-${index}.jpg`, { type: 'image/jpeg' }));
+
+  const response = await app.fetch(new Request('https://worker.example/api/analyze', {
+    method: 'POST', headers: { Authorization: 'Renvoy opaque-token_123' }, body: form,
+  }), {
+    OPENAI_API_KEY: 'test-key',
+    RENVOY_IDENTITY_VERIFICATION_URL: 'https://identity.renvoy.example/v1/identity/renitizer/verify',
+  });
+
+  assert.equal(response.status, 200);
+  assert.ok(maximumActive <= 4, `Expected no more than four concurrent provider calls, got ${maximumActive}.`);
+});

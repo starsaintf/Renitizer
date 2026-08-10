@@ -9,8 +9,8 @@ test('the workspace preserves sampled-video timing when requesting cloud analysi
   ]);
 
   assert.match(app, /frameContext: frameSamples\?\.map/);
-  assert.match(app, /import \{ buildVideoSampleTimes \} from '\.\/video\/sampling\.js';/);
-  assert.match(app, /const times = buildVideoSampleTimes\(video\.duration\);/);
+  assert.match(app, /import \{ buildVideoSampleTimes, videoFrameDimensions, videoSamplingOptions \} from '\.\/video\/sampling\.js';/);
+  assert.match(app, /const times = buildVideoSampleTimes\(video\.duration, sampling\);/);
   assert.match(app, /return frames;/);
   assert.match(app, /time, duration/);
   assert.match(app, /linkSampledVideoFindings/);
@@ -18,6 +18,10 @@ test('the workspace preserves sampled-video timing when requesting cloud analysi
   assert.match(page, /id="video-advanced"/);
   assert.match(page, /id="video-track-list"/);
   assert.match(page, /id="verify-clean-video-button"/);
+  assert.match(page, /id="video-coverage-option"/);
+  assert.match(page, /id="video-check-coverage"/);
+  assert.match(app, /videoSamplingOptions\(ui\['video-check-coverage'\]\.value\)/);
+  assert.match(app, /videoFrameDimensions\(video\.videoWidth, video\.videoHeight\)/);
   assert.match(app, /function cleanVideo\(/);
   assert.match(app, /function recheckFinishedVideo\(/);
   assert.match(app, /state\.remoteVideo\?\.ready/);

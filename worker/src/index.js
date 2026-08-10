@@ -38,6 +38,7 @@ const visualFindingCategories = [
 ];
 
 const audioContextCategories = ['location-announcement', 'place-mention', 'company-mention', 'school-mention', 'name-mention'];
+const MAX_CONCURRENT_ANALYSES = 4;
 const audioContextDefinitions = {
   'location-announcement': {
     title: 'Location announcement in audio', detail: 'An announcement may reveal a station, airport, road, or other location.', severity: 'high',
@@ -123,7 +124,7 @@ export function createWorker({ identityFetcher = fetch, processorFetcher = fetch
     const files = form.getAll('file').filter((file) => file instanceof File);
     if (!files.length) return json({ error: 'At least one media file is required.' }, 400);
     const frameContexts = parseFrameContexts(form.get('frameContext'), files.length);
-    const findings = (await Promise.all(files.map((file, index) => analyzeMedia(file, env, frameContexts[index], analysisFetcher)))).flat();
+    const findings = (await mapWithConcurrency(files, MAX_CONCURRENT_ANALYSES, (file, index) => analyzeMedia(file, env, frameContexts[index], analysisFetcher))).flat();
     const analyses = parseAnalyses(form.get('analyses'));
     const osint = analyses.includes('clean-copy-osint')
       ? await runGoogleVisionChecks(files.filter((file) => file.type.startsWith('image/')), env, analysisFetcher)
@@ -606,7 +607,7 @@ export function googleVisionPrivacyFindings(payload = {}) {
 
 async function runGoogleVisionChecks(files, env, analysisFetcher) {
   if (!env.GOOGLE_CLOUD_VISION_API_KEY || !files.length) return { findings: [], providerChecks: { faceLandmarks: false, reverseImage: false } };
-  const results = await Promise.all(files.map(async (file) => {
+  const results = await mapWithConcurrency(files, MAX_CONCURRENT_ANALYSES, async (file) => {
     const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
     const upstream = await analysisFetcher(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(env.GOOGLE_CLOUD_VISION_API_KEY)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildGoogleVisionRequest(base64)),
@@ -616,11 +617,25 @@ async function runGoogleVisionChecks(files, env, analysisFetcher) {
     const response = Array.isArray(payload?.responses) ? payload.responses[0] : null;
     if (!response || response.error) return { ok: false, findings: [unavailable('cloud-osint-unreadable', 'The optional web-match and landmark check did not return a usable result.')] };
     return { ok: true, findings: googleVisionPrivacyFindings(payload) };
-  }));
+  });
   return {
     findings: results.flatMap((result) => result.findings),
     providerChecks: { faceLandmarks: results.every((result) => result.ok), reverseImage: results.every((result) => result.ok) },
   };
+}
+
+async function mapWithConcurrency(items, maximum, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, maximum), items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function transcribeAudio(file, env, analysisFetcher = fetch) {

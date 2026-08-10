@@ -21,13 +21,13 @@ import { createHostedShare, downloadHostedShare, revokeHostedShare } from './sha
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile, setDocumentPlanAction } from './documents/policy.js';
 import { documentReadyCopy, documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
-import { buildVideoSampleTimes } from './video/sampling.js';
+import { buildVideoSampleTimes, videoFrameDimensions, videoSamplingOptions } from './video/sampling.js';
 import { linkSampledVideoFindings } from './video/tracking.js';
 import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'video-coverage-option', 'video-check-coverage', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
 const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
@@ -104,6 +104,8 @@ async function selectFile(file) {
   ui['sanitize-button'].textContent = isDocument ? documentUiCopy(documentType).actionLabel : isAudio ? 'Remove private audio' : isVideo ? 'Make a private clean video' : 'Make a clean copy';
   ui['download-button'].disabled = true;
   ui['report-button'].disabled = true;
+  ui['video-coverage-option'].hidden = !isVideo;
+  ui['video-check-coverage'].value = 'standard';
   updateCloudButton();
   ui['results-step'].hidden = true;
   ui['save-step'].hidden = true;
@@ -359,7 +361,7 @@ async function recheckFinishedVideo() {
   try {
     const blob = await downloadRemoteJob(state.remoteVideo);
     const cleanVideo = new File([blob], 'renitized-video.mp4', { type: 'video/mp4' });
-    const frameSamples = await extractVideoFrames(cleanVideo);
+    const frameSamples = await extractVideoFrames(cleanVideo, videoSamplingOptions(ui['video-check-coverage'].value));
     const cloudSession = await requestRenvoySession();
     const cloudRecheck = await recheckCleanVideoFrames({
       frames: frameSamples,
@@ -423,8 +425,9 @@ async function cloudScan() {
   busy(ui['cloud-button'], 'Sending…');
   ui['cloud-status'].textContent = 'Sending your selected file to the service you chose…';
   try {
-    const frameSamples = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file) : null;
+    const frameSamples = state.file.type.startsWith('video/') ? await extractVideoFrames(state.file, videoSamplingOptions(ui['video-check-coverage'].value)) : null;
     const cloudFiles = frameSamples ? frameSamples.map((sample) => sample.file) : [state.file];
+    if (frameSamples) ui['cloud-status'].textContent = `Checking ${frameSamples.length} moments from your video…`;
     const cloudSession = await requestRenvoySession();
     const cloudFindings = await requestCloudAnalysis({ endpoint: ui['cloud-endpoint'].value.trim(), files: cloudFiles, analyses: ['visual-pii', 'audio-pii', 'video-frame-context'], frameContext: frameSamples?.map(({ time, duration }) => ({ time, duration })), consent: ui['cloud-consent'].checked, session: cloudSession.available ? cloudSession : null });
     const findingsForReview = frameSamples
@@ -917,7 +920,7 @@ async function rerunCleanScanners(file, availableChecks) {
   return { findings, assessedChecks };
 }
 
-async function extractVideoFrames(file) {
+async function extractVideoFrames(file, sampling = {}) {
   const url = URL.createObjectURL(file);
   const video = document.createElement('video');
   video.src = url; video.muted = true; video.playsInline = true;
@@ -925,9 +928,11 @@ async function extractVideoFrames(file) {
     await waitFor(video, 'loadeddata');
     if (!video.videoWidth || !video.videoHeight) throw new Error('Video unavailable');
     if (!Number.isFinite(video.duration) || video.duration <= 0) throw new Error('Video unavailable');
+    const frameDimensions = videoFrameDimensions(video.videoWidth, video.videoHeight);
+    if (!frameDimensions) throw new Error('Video unavailable');
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    const times = buildVideoSampleTimes(video.duration);
+    canvas.width = frameDimensions.width; canvas.height = frameDimensions.height;
+    const times = buildVideoSampleTimes(video.duration, sampling);
     const frames = [];
     for (const [index, time] of times.entries()) {
       if (index > 0) { video.currentTime = time; await waitFor(video, 'seeked'); }
