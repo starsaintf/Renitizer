@@ -11,7 +11,7 @@ import { getAudioProcessingState, getAudioReviewItems, inspectAudioFile, resolve
 import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
-import { recheckCleanImage, recheckCleanVideoFrames } from './core/clean-copy-cloud-recheck.js';
+import { recheckCleanAudio, recheckCleanImage, recheckCleanVideoFrames } from './core/clean-copy-cloud-recheck.js';
 import { getViewFromHash } from './core/view-state.js';
 import { findingStatus, friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
@@ -200,6 +200,7 @@ async function cleanSelectedFile() {
 
 async function cleanAudio() {
   if (!state.file || !state.audio.processing?.available || !state.audio.duration) return;
+  const beforeFindings = state.findings;
   const plan = resolveAudioRedactionPlan({ findings: state.findings, manualRanges: state.audio.manualRanges, duration: state.audio.duration });
   if (!plan.length) { ui['sanitize-note'].textContent = 'Choose at least one time range to mute or bleep before making a clean copy.'; return; }
   busy(ui['sanitize-button'], 'Removing private audio…');
@@ -211,9 +212,26 @@ async function cleanAudio() {
     const manualFindings = state.audio.manualRanges.map((range) => ({ id: range.id, category: 'audio-redaction', title: 'Manual audio redaction', detail: 'A manually selected audio range.', severity: 'medium', confidence: 1, assessment: 'assessed', timeRange: { start: range.start, end: range.end }, redactionAction: range.action, resolved: selected.has(range.id) }));
     state.findings = [...state.findings.map((finding) => selected.has(finding.id) ? { ...finding, resolved: true } : finding), ...manualFindings];
     state.share = null;
-    state.verification = null;
-    ui['clean-status'].textContent = `Clean WAV copy created with ${plan.length} selected range${plan.length === 1 ? '' : 's'}.`;
-    ui['sanitize-note'].textContent = 'Your WAV clean copy is ready to save. Review it before sharing.';
+    const cloudSession = ui['cloud-consent'].checked ? await requestRenvoySession() : null;
+    const cloudRecheck = await recheckCleanAudio({
+      file: state.cleanFile,
+      endpoint: ui['cloud-endpoint'].value.trim(),
+      consent: ui['cloud-consent'].checked,
+      session: cloudSession?.available ? cloudSession : null,
+      requestCloudAnalysis,
+    });
+    state.verification = createVerification({
+      beforeFindings: state.findings,
+      afterFindings: cloudRecheck.findings,
+      providerResults: cloudRecheck.providerResults,
+      requiredProviderChecks: cloudRecheck.requiredProviderChecks,
+    });
+    ui['clean-status'].textContent = state.verification.readiness.label;
+    ui['sanitize-note'].textContent = cloudRecheck.failed
+      ? 'Your clean WAV copy was made, but the extra clean-copy check could not finish. Review it before sharing.'
+      : cloudRecheck.attempted
+        ? `${state.verification.readiness.label}. Your clean WAV copy was checked again by the service you chose.`
+        : `Clean WAV copy created with ${plan.length} selected range${plan.length === 1 ? '' : 's'}.`;
     ui['download-button'].disabled = false;
     state.receiptReady = true;
     updateReport();

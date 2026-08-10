@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as cleanCopyRecheck from '../src/core/clean-copy-cloud-recheck.js';
 
-const { recheckCleanImage } = cleanCopyRecheck;
+const { recheckCleanImage, recheckCleanAudio } = cleanCopyRecheck;
 
 const file = { type: 'image/jpeg', name: 'clean.jpg' };
+const cleanAudio = { type: 'audio/wav', name: 'clean.wav' };
 const finding = { id: 'cloud-plate', category: 'vehicle-plate', detail: 'A plate is visible.', assessment: 'assessed', source: 'cloud' };
 
 test('does not send a clean image unless the user opted into a named cloud service', async () => {
@@ -82,6 +83,27 @@ test('records a failed opted-in recheck without fabricating provider results', a
   assert.deepEqual(result, { attempted: true, failed: true, findings: [], providerResults: {}, requiredProviderChecks: ['cloud'] });
 });
 
+test('rechecks only the clean audio copy when a person opted into a named service', async () => {
+  assert.equal(typeof recheckCleanAudio, 'function');
+  let request;
+  const result = await recheckCleanAudio({
+    file: cleanAudio,
+    endpoint: 'https://privacy.example/check',
+    consent: true,
+    requestCloudAnalysis: async (value) => { request = value; return []; },
+  });
+
+  assert.deepEqual(request, {
+    endpoint: 'https://privacy.example/check',
+    file: cleanAudio,
+    analyses: ['audio-pii', 'clean-copy-verification'],
+    consent: true,
+  });
+  assert.equal(result.attempted, true);
+  assert.deepEqual(result.providerResults, { cloud: true });
+  assert.deepEqual(result.requiredProviderChecks, ['cloud']);
+});
+
 test('requires the selected landmark and web-match checks for an advanced clean-copy recheck', async () => {
   let request;
   const result = await recheckCleanImage({
@@ -109,12 +131,13 @@ test('requires the selected landmark and web-match checks for an advanced clean-
 test('the workspace sends the clean image, not the original, into the opted-in recheck', async () => {
   const app = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
   const page = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(app, /import \{ recheckCleanImage(?:, recheckCleanVideoFrames)? \} from '\.\/core\/clean-copy-cloud-recheck\.js';/);
+  assert.match(app, /import \{ recheckCleanAudio, recheckCleanImage, recheckCleanVideoFrames \} from '\.\/core\/clean-copy-cloud-recheck\.js';/);
   assert.match(app, /recheckCleanImage\(\s*\{\s*file: state\.cleanFile,/);
   assert.match(app, /requiredProviderChecks: cloudRecheck\.requiredProviderChecks/);
   assert.match(page, /id="osint-consent"/);
   assert.match(page, /Web-match and landmark check/);
   assert.match(app, /includeOsint: ui\['osint-consent'\]\.checked/);
+  assert.match(app, /recheckCleanAudio\(\s*\{\s*file: state\.cleanFile,/);
 });
 
 test('rechecks only sampled frames from a finished clean video and preserves their timing', async () => {
