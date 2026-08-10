@@ -27,7 +27,7 @@ import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
 const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
@@ -240,6 +240,7 @@ async function cleanImage() {
       file: state.cleanFile,
       endpoint: ui['cloud-endpoint'].value,
       consent: ui['cloud-consent'].checked,
+      includeOsint: ui['osint-consent'].checked,
       session: cloudSession?.available ? cloudSession : null,
       requestCloudAnalysis,
     });
@@ -391,7 +392,12 @@ async function cloudScan() {
   finally { idle(ui['cloud-button'], 'Send for an extra check'); }
 }
 
-function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
+function updateCloudButton() {
+  const allowed = ui['cloud-consent'].checked;
+  ui['cloud-button'].disabled = !state.file || !allowed;
+  ui['osint-consent'].disabled = !allowed;
+  if (!allowed) ui['osint-consent'].checked = false;
+}
 function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderAudioAdvanced(); renderVideoAdvanced(); renderShareSection(); }
 
 function renderDocumentPlan() {

@@ -87,7 +87,11 @@ export function createWorker({ identityFetcher = fetch, processorFetcher = fetch
     if (!files.length) return json({ error: 'At least one media file is required.' }, 400);
     const frameContexts = parseFrameContexts(form.get('frameContext'), files.length);
     const findings = (await Promise.all(files.map((file, index) => analyzeMedia(file, env, frameContexts[index], analysisFetcher)))).flat();
-    return json({ findings });
+    const analyses = parseAnalyses(form.get('analyses'));
+    const osint = analyses.includes('clean-copy-osint')
+      ? await runGoogleVisionChecks(files.filter((file) => file.type.startsWith('image/')), env, analysisFetcher)
+      : null;
+    return json({ findings: [...findings, ...(osint?.findings || [])], ...(osint ? { providerChecks: osint.providerChecks } : {}) });
     },
     async queue(batch, env) {
       for (const message of batch.messages) await consumeQueuedJob(message, env, processorFetcher);
@@ -531,6 +535,57 @@ export function buildImageVisionRequest(imageUrl) {
   };
 }
 
+export function buildGoogleVisionRequest(base64Image) {
+  return {
+    requests: [{
+      image: { content: String(base64Image || '') },
+      features: [
+        { type: 'LANDMARK_DETECTION', maxResults: 5 },
+        { type: 'WEB_DETECTION', maxResults: 5 },
+      ],
+    }],
+  };
+}
+
+export function googleVisionPrivacyFindings(payload = {}) {
+  const response = Array.isArray(payload.responses) ? payload.responses[0] : null;
+  if (!response || response.error) return [];
+  const landmark = Array.isArray(response.landmarkAnnotations) ? response.landmarkAnnotations[0] : null;
+  const web = response.webDetection && typeof response.webDetection === 'object' ? response.webDetection : null;
+  const hasWebMatch = Boolean(web && [web.fullMatchingImages, web.partialMatchingImages, web.pagesWithMatchingImages].some((items) => Array.isArray(items) && items.length));
+  const findings = [];
+  if (landmark) findings.push({
+    id: 'osint-landmark', category: 'landmark', title: 'A recognizable landmark may still be visible',
+    detail: 'A configured clean-copy check found a landmark clue.', severity: 'high', confidence: boundedConfidence(landmark.score),
+    recommendation: 'Review the landmark before sharing.', assessment: 'assessed', source: 'osint',
+  });
+  if (hasWebMatch) findings.push({
+    id: 'osint-web-match', category: 'reverse-image', title: 'A web match may still be possible',
+    detail: 'A configured clean-copy check found matching-image signals.', severity: 'high', confidence: 0.9,
+    recommendation: 'Review the clean copy before sharing.', assessment: 'assessed', source: 'osint',
+  });
+  return findings;
+}
+
+async function runGoogleVisionChecks(files, env, analysisFetcher) {
+  if (!env.GOOGLE_CLOUD_VISION_API_KEY || !files.length) return { findings: [], providerChecks: { faceLandmarks: false, reverseImage: false } };
+  const results = await Promise.all(files.map(async (file) => {
+    const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+    const upstream = await analysisFetcher(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(env.GOOGLE_CLOUD_VISION_API_KEY)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildGoogleVisionRequest(base64)),
+    });
+    if (!upstream.ok) return { ok: false, findings: [unavailable('cloud-osint-failed', 'The optional web-match and landmark check could not finish.')] };
+    const payload = await upstream.json();
+    const response = Array.isArray(payload?.responses) ? payload.responses[0] : null;
+    if (!response || response.error) return { ok: false, findings: [unavailable('cloud-osint-unreadable', 'The optional web-match and landmark check did not return a usable result.')] };
+    return { ok: true, findings: googleVisionPrivacyFindings(payload) };
+  }));
+  return {
+    findings: results.flatMap((result) => result.findings),
+    providerChecks: { faceLandmarks: results.every((result) => result.ok), reverseImage: results.every((result) => result.ok) },
+  };
+}
+
 async function transcribeAudio(file, env, analysisFetcher = fetch) {
   const body = buildTimestampedTranscriptionBody(file);
   const upstream = await analysisFetcher('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body });
@@ -551,3 +606,5 @@ export function buildTimestampedTranscriptionBody(file) {
 function unavailable(id, detail) { return { id, category: 'capability', title: 'Cloud media boundary', detail, severity: 'low', confidence: 1, recommendation: 'Use a provider path configured for this media type.', assessment: 'unavailable', resolved: false }; }
 function json(value, status = 200) { return new Response(JSON.stringify(value), { status, headers: { ...cors, 'Content-Type': 'application/json' } }); }
 function bytesToBase64(bytes) { let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); }
+function boundedConfidence(value) { return Math.max(0, Math.min(1, Number(value) || 0)); }
+function parseAnalyses(value) { try { const parsed = JSON.parse(String(value || '[]')); return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string' && item.length <= 64) : []; } catch { return []; } }

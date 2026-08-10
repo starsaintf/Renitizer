@@ -16,6 +16,8 @@ test('production workflow publishes both private processor images to GHCR behind
   assert.match(workflow, /\/tests\/test\/ffmpeg-smoke\.mjs/);
   assert.match(workflow, /ghcr\.io\/galee-labs\/renitizer-\$\{\{ matrix\.processor \}\}/);
   assert.match(workflow, /OPENAI_API_KEY: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+  assert.match(workflow, /GOOGLE_CLOUD_VISION_API_KEY: \$\{\{ secrets\.GOOGLE_CLOUD_VISION_API_KEY \}\}/);
+  assert.match(workflow, /\.\.\.\(process\.env\.GOOGLE_CLOUD_VISION_API_KEY \? \{ GOOGLE_CLOUD_VISION_API_KEY: process\.env\.GOOGLE_CLOUD_VISION_API_KEY \} : \{\}\)/);
   assert.match(workflow, /PROCESSOR_AUTH_TOKEN: \$\{\{ secrets\.PROCESSOR_AUTH_TOKEN \}\}/);
   assert.match(workflow, /VIDEO_PROCESSOR_URL: \$\{\{ secrets\.VIDEO_PROCESSOR_URL \}\}/);
   assert.match(workflow, /DOCUMENT_PROCESSOR_URL: \$\{\{ secrets\.DOCUMENT_PROCESSOR_URL \}\}/);

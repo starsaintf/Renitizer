@@ -66,6 +66,8 @@ The production workflow builds both processor images to GHCR as `renitizer-video
 
 For the Galee-Labs production workflow, add these GitHub Environment `production` secrets before running it: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `OPENAI_API_KEY`, `PROCESSOR_AUTH_TOKEN`, `VIDEO_PROCESSOR_URL`, `DOCUMENT_PROCESSOR_URL`, and `RENVOY_IDENTITY_VERIFICATION_URL`. The workflow refuses to deploy the full Worker when any are absent. Starsaintf deliberately uses its separate local-only Worker workflow and does not receive Renvoy or processor secrets.
 
+`GOOGLE_CLOUD_VISION_API_KEY` is optional. When it is configured, a person can explicitly request a clean-copy Web-match and landmark check. The Worker sends only that clean image to the provider and returns only risk signals—not landmark names, matching pages, or external URLs. Without this optional secret, the receipt correctly marks those checks as not assessed.
+
 ## Native wrappers
 
 - Capacitor: install Capacitor in a wrapper project, point it at this checkout's static web directory (`webDir: "."`), then add Android/iOS platforms. `capacitor.config.json` provides the app identity.

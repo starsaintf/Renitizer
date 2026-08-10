@@ -80,9 +80,37 @@ test('records a failed opted-in recheck without fabricating provider results', a
   assert.deepEqual(result, { attempted: true, failed: true, findings: [], providerResults: {}, requiredProviderChecks: ['cloud'] });
 });
 
+test('requires the selected landmark and web-match checks for an advanced clean-copy recheck', async () => {
+  let request;
+  const result = await recheckCleanImage({
+    file,
+    endpoint: 'https://privacy.example/check',
+    consent: true,
+    includeOsint: true,
+    requestCloudAnalysis: async (value) => {
+      request = value;
+      return { findings: [], providerChecks: { faceLandmarks: true, reverseImage: true } };
+    },
+  });
+
+  assert.deepEqual(request, {
+    endpoint: 'https://privacy.example/check',
+    file,
+    analyses: ['visual-pii', 'clean-copy-verification', 'clean-copy-osint'],
+    consent: true,
+    returnDetails: true,
+  });
+  assert.deepEqual(result.providerResults, { cloud: true, faceLandmarks: true, reverseImage: true });
+  assert.deepEqual(result.requiredProviderChecks, ['cloud', 'faceLandmarks', 'reverseImage']);
+});
+
 test('the workspace sends the clean image, not the original, into the opted-in recheck', async () => {
   const app = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+  const page = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(app, /import \{ recheckCleanImage \} from '\.\/core\/clean-copy-cloud-recheck\.js';/);
   assert.match(app, /recheckCleanImage\(\s*\{\s*file: state\.cleanFile,/);
   assert.match(app, /requiredProviderChecks: cloudRecheck\.requiredProviderChecks/);
+  assert.match(page, /id="osint-consent"/);
+  assert.match(page, /Web-match and landmark check/);
+  assert.match(app, /includeOsint: ui\['osint-consent'\]\.checked/);
 });

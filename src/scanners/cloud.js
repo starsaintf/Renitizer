@@ -3,7 +3,7 @@ import { clampNormalizedBox } from '../sanitize/redaction.js';
 
 const requiredFields = ['id', 'category', 'title', 'detail', 'severity', 'confidence'];
 
-export async function requestCloudAnalysis({ endpoint, file, files, analyses, frameContext, consent, session, fetcher = fetch }) {
+export async function requestCloudAnalysis({ endpoint, file, files, analyses, frameContext, consent, session, returnDetails = false, fetcher = fetch }) {
   if (!consent) throw new Error('Cloud analysis requires explicit consent.');
   const selectedFiles = files || (file ? [file] : []);
   if (!selectedFiles.length) throw new Error('Choose a file before requesting cloud analysis.');
@@ -13,7 +13,8 @@ export async function requestCloudAnalysis({ endpoint, file, files, analyses, fr
   const response = await fetcher(service.endpoint, { method: 'POST', body: form, headers: service.headers });
   if (!response.ok) throw new Error(`Cloud analysis failed (${response.status}).`);
   const payload = await response.json();
-  return normalizeCloudFindings(payload.findings);
+  const findings = normalizeCloudFindings(payload.findings);
+  return returnDetails ? { findings, providerChecks: normalizeProviderChecks(payload.providerChecks) } : findings;
 }
 
 export function resolveCloudService({ endpoint, session } = {}) {
@@ -75,4 +76,9 @@ function normalizeCloudBox(value) {
   if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
   const box = clampNormalizedBox({ x, y, width, height });
   return box.width > 0 && box.height > 0 ? box : null;
+}
+
+function normalizeProviderChecks(value) {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(['faceLandmarks', 'reverseImage'].flatMap((key) => typeof value[key] === 'boolean' ? [[key, value[key]]] : []));
 }

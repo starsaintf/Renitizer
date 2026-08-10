@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { File } from 'node:buffer';
-import { buildCloudAnalysisForm, normalizeCloudFindings } from '../src/scanners/cloud.js';
+import { buildCloudAnalysisForm, normalizeCloudFindings, requestCloudAnalysis } from '../src/scanners/cloud.js';
 
 const plateFinding = {
   id: 'plate-1', category: 'vehicle-plate', title: 'Vehicle plate detected', detail: 'A vehicle plate is visible.',
@@ -31,4 +31,22 @@ test('buildCloudAnalysisForm carries only timing context for sampled video frame
   assert.equal(form.getAll('file').length, 1);
   assert.deepEqual(JSON.parse(form.get('analyses')), ['visual-pii', 'video-frame-context']);
   assert.deepEqual(JSON.parse(form.get('frameContext')), [{ time: 4, duration: 12 }]);
+});
+
+test('keeps explicit clean-copy provider checks with the cloud findings', async () => {
+  const result = await requestCloudAnalysis({
+    endpoint: 'https://privacy.example/check',
+    file: new File(['clean'], 'clean.jpg', { type: 'image/jpeg' }),
+    consent: true,
+    returnDetails: true,
+    fetcher: async () => Response.json({
+      findings: [plateFinding],
+      providerChecks: { faceLandmarks: true, reverseImage: true },
+    }),
+  });
+
+  assert.deepEqual(result, {
+    findings: [{ ...plateFinding, assessment: 'assessed', resolved: false, source: 'cloud' }],
+    providerChecks: { faceLandmarks: true, reverseImage: true },
+  });
 });

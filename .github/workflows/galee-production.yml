@@ -96,6 +96,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CLOUD_VISION_API_KEY: ${{ secrets.GOOGLE_CLOUD_VISION_API_KEY }}
           PROCESSOR_AUTH_TOKEN: ${{ secrets.PROCESSOR_AUTH_TOKEN }}
           VIDEO_PROCESSOR_URL: ${{ secrets.VIDEO_PROCESSOR_URL }}
           DOCUMENT_PROCESSOR_URL: ${{ secrets.DOCUMENT_PROCESSOR_URL }}
@@ -109,6 +110,7 @@ jobs:
           if (missing.length) throw new Error(`Missing required production secrets: ${missing.join(', ')}`);
           writeFileSync('.worker-secrets.json', JSON.stringify({
             OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+            ...(process.env.GOOGLE_CLOUD_VISION_API_KEY ? { GOOGLE_CLOUD_VISION_API_KEY: process.env.GOOGLE_CLOUD_VISION_API_KEY } : {}),
             PROCESSOR_AUTH_TOKEN: process.env.PROCESSOR_AUTH_TOKEN,
             PROCESSOR_URL: process.env.VIDEO_PROCESSOR_URL,
             DOCUMENT_PROCESSOR_URL: process.env.DOCUMENT_PROCESSOR_URL,
