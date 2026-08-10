@@ -17,7 +17,9 @@ test('the workspace preserves sampled-video timing when requesting cloud analysi
   assert.match(app, /sampleTimes: frameSamples\.map\(\(\{ time \}\) => time\)/);
   assert.match(page, /id="video-advanced"/);
   assert.match(page, /id="video-track-list"/);
+  assert.match(page, /id="verify-clean-video-button"/);
   assert.match(app, /function cleanVideo\(/);
+  assert.match(app, /function recheckFinishedVideo\(/);
   assert.match(app, /state\.remoteVideo\?\.ready/);
   assert.match(app, /function render\(\) \{[\s\S]*const isImage = state\.file\?\.type\.startsWith\('image\/'\);/);
   assert.match(app, /if \(isImage && finding\.boundingBox\) \{/);

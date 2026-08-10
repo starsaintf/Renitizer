@@ -3,16 +3,44 @@
  * the newly-created image copy. It never sends the source image from here.
  */
 export async function recheckCleanImage({ file, endpoint, consent, session, includeOsint = false, requestCloudAnalysis } = {}) {
-  const hasNamedService = Boolean(String(endpoint || '').trim()) || Boolean(session?.available && session?.endpoint && session?.capability);
-  if (!consent || !hasNamedService || !file?.type?.startsWith('image/')) {
-    return emptyResult(false);
-  }
+  return recheckCleanFrames({
+    requestFiles: { file },
+    endpoint,
+    consent,
+    session,
+    includeOsint,
+    requestCloudAnalysis,
+  });
+}
 
+/**
+ * Rechecks sampled frames from a finished video. Only the processor's output
+ * frames are sent, never the source video.
+ */
+export async function recheckCleanVideoFrames({ frames = [], endpoint, consent, session, includeOsint = false, requestCloudAnalysis } = {}) {
+  const usableFrames = frames.filter((frame) => frame?.file?.type?.startsWith('image/'));
+  return recheckCleanFrames({
+    requestFiles: {
+      files: usableFrames.map(({ file }) => file),
+      frameContext: usableFrames.map(({ time, duration }) => ({ time, duration })),
+    },
+    endpoint,
+    consent,
+    session,
+    includeOsint,
+    requestCloudAnalysis,
+  });
+}
+
+async function recheckCleanFrames({ requestFiles, endpoint, consent, session, includeOsint = false, requestCloudAnalysis } = {}) {
+  const hasNamedService = Boolean(String(endpoint || '').trim()) || Boolean(session?.available && session?.endpoint && session?.capability);
+  const files = requestFiles?.files || (requestFiles?.file ? [requestFiles.file] : []);
+  if (!consent || !hasNamedService || !files.length || files.some((file) => !file?.type?.startsWith('image/'))) return emptyResult(false);
   try {
     const response = await requestCloudAnalysis({
       ...(String(endpoint || '').trim() ? { endpoint: String(endpoint).trim() } : {}),
       ...(session?.available ? { session } : {}),
-      file,
+      ...requestFiles,
       analyses: ['visual-pii', 'clean-copy-verification', ...(includeOsint ? ['clean-copy-osint'] : [])],
       consent: true,
       ...(includeOsint ? { returnDetails: true } : {}),

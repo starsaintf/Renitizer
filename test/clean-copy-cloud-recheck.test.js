@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { recheckCleanImage } from '../src/core/clean-copy-cloud-recheck.js';
+import * as cleanCopyRecheck from '../src/core/clean-copy-cloud-recheck.js';
+
+const { recheckCleanImage } = cleanCopyRecheck;
 
 const file = { type: 'image/jpeg', name: 'clean.jpg' };
 const finding = { id: 'cloud-plate', category: 'vehicle-plate', detail: 'A plate is visible.', assessment: 'assessed', source: 'cloud' };
@@ -107,10 +109,33 @@ test('requires the selected landmark and web-match checks for an advanced clean-
 test('the workspace sends the clean image, not the original, into the opted-in recheck', async () => {
   const app = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
   const page = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(app, /import \{ recheckCleanImage \} from '\.\/core\/clean-copy-cloud-recheck\.js';/);
+  assert.match(app, /import \{ recheckCleanImage(?:, recheckCleanVideoFrames)? \} from '\.\/core\/clean-copy-cloud-recheck\.js';/);
   assert.match(app, /recheckCleanImage\(\s*\{\s*file: state\.cleanFile,/);
   assert.match(app, /requiredProviderChecks: cloudRecheck\.requiredProviderChecks/);
   assert.match(page, /id="osint-consent"/);
   assert.match(page, /Web-match and landmark check/);
   assert.match(app, /includeOsint: ui\['osint-consent'\]\.checked/);
+});
+
+test('rechecks only sampled frames from a finished clean video and preserves their timing', async () => {
+  assert.equal(typeof cleanCopyRecheck.recheckCleanVideoFrames, 'function');
+  const cleanFrames = [
+    { file: { type: 'image/jpeg', name: 'finished-frame-1.jpg' }, time: 1, duration: 12 },
+    { file: { type: 'image/jpeg', name: 'finished-frame-2.jpg' }, time: 11, duration: 12 },
+  ];
+  const calls = [];
+
+  const result = await cleanCopyRecheck.recheckCleanVideoFrames({
+    frames: cleanFrames,
+    endpoint: 'https://privacy.example/analyze',
+    consent: true,
+    requestCloudAnalysis: async (request) => { calls.push(request); return []; },
+  });
+
+  assert.equal(result.attempted, true);
+  assert.deepEqual(result.providerResults, { cloud: true });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].files, cleanFrames.map(({ file }) => file));
+  assert.deepEqual(calls[0].frameContext, [{ time: 1, duration: 12 }, { time: 11, duration: 12 }]);
+  assert.deepEqual(calls[0].analyses, ['visual-pii', 'clean-copy-verification']);
 });

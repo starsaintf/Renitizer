@@ -11,7 +11,7 @@ import { getAudioProcessingState, getAudioReviewItems, inspectAudioFile, resolve
 import { makeReport } from './core/report.js';
 import { createReceipt } from './core/receipt.js';
 import { createVerification } from './core/verification.js';
-import { recheckCleanImage } from './core/clean-copy-cloud-recheck.js';
+import { recheckCleanImage, recheckCleanVideoFrames } from './core/clean-copy-cloud-recheck.js';
 import { getViewFromHash } from './core/view-state.js';
 import { findingStatus, friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
@@ -27,7 +27,7 @@ import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
 const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
@@ -43,6 +43,7 @@ ui['cloud-consent'].addEventListener('change', updateCloudButton);
 ui['add-redaction-button'].addEventListener('click', addRedactionBox);
 ui['apply-all-button'].addEventListener('click', () => { state.findings = state.findings.map((finding) => finding.boundingBox ? { ...finding, redactionAction: 'blur', resolved: false } : finding); invalidateCleanVerification(); updateReport(); });
 ui['add-audio-range-button']?.addEventListener('click', addManualAudioRange);
+ui['verify-clean-video-button']?.addEventListener('click', recheckFinishedVideo);
 ui['share-expiry'].addEventListener('change', resetSharePackage);
 ui['share-detailed-findings'].addEventListener('change', resetSharePackage);
 ui['share-package-button'].addEventListener('click', createEncryptedPackage);
@@ -339,12 +340,58 @@ async function refreshRemoteVideo() {
       state.remoteVideo = { ...state.remoteVideo, ready: true };
       ui['download-button'].disabled = false;
       ui['clean-status'].textContent = 'Your private clean video is ready to save.';
-      ui['sanitize-note'].textContent = 'Your covered MP4 is ready in Renvoy.';
+      ui['sanitize-note'].textContent = 'Your covered MP4 is ready. You can save it, or check sampled moments in the finished copy again.';
       updateReport();
     } else if (status.job?.state === 'failed') {
       ui['clean-status'].textContent = 'The private video clean could not finish. Your original was not changed.';
     } else setTimeout(() => { void refreshRemoteVideo(); }, 2500);
   } catch { ui['clean-status'].textContent = 'We could not check the private video clean yet. It may still be working.'; }
+}
+
+async function recheckFinishedVideo() {
+  if (!state.remoteVideo?.ready) return;
+  if (!ui['cloud-consent'].checked) {
+    ui['sanitize-note'].textContent = 'Turn on the extra private check in More checks before checking the finished video again.';
+    return;
+  }
+  busy(ui['verify-clean-video-button'], 'Checking finished video…');
+  ui['sanitize-note'].textContent = 'Sampling the finished private MP4. Only those clean frames are sent for this extra check.';
+  try {
+    const blob = await downloadRemoteJob(state.remoteVideo);
+    const cleanVideo = new File([blob], 'renitized-video.mp4', { type: 'video/mp4' });
+    const frameSamples = await extractVideoFrames(cleanVideo);
+    const cloudSession = await requestRenvoySession();
+    const cloudRecheck = await recheckCleanVideoFrames({
+      frames: frameSamples,
+      endpoint: ui['cloud-endpoint'].value.trim(),
+      consent: true,
+      includeOsint: ui['osint-consent'].checked,
+      session: cloudSession.available ? cloudSession : null,
+      requestCloudAnalysis,
+    });
+    if (!cloudRecheck.attempted) {
+      ui['sanitize-note'].textContent = 'Connect Renvoy or enter a trusted service in More checks before checking the finished video again.';
+      return;
+    }
+    const afterFindings = linkSampledVideoFindings(cloudRecheck.findings, {
+      sampleTimes: frameSamples.map(({ time }) => time),
+      duration: state.video.duration,
+    });
+    state.verification = createVerification({
+      beforeFindings: state.findings,
+      afterFindings,
+      redactionPlan: normalizeTrackedVideoBoxes({ duration: state.video.duration, tracks: state.findings }),
+      providerResults: cloudRecheck.providerResults,
+      requiredProviderChecks: cloudRecheck.requiredProviderChecks,
+    });
+    state.receiptReady = true;
+    ui['sanitize-note'].textContent = cloudRecheck.failed
+      ? 'The finished video is still ready, but its extra check could not finish. Review it before sharing.'
+      : `${state.verification.readiness.label}. The finished video was checked again using sampled clean moments.`;
+    updateReport();
+  } catch {
+    ui['sanitize-note'].textContent = 'The finished video is still ready, but we could not check it again. Please try later.';
+  } finally { idle(ui['verify-clean-video-button'], 'Check finished video again'); }
 }
 
 async function refreshRemoteDocument() {
@@ -535,6 +582,11 @@ function renderVerification() {
     item.textContent = `${friendlyCheckName(check)}: ${result.status.replace('-', ' ')} — ${result.reason}`;
     ui['verification-checks'].append(item);
   }
+  for (const finding of state.verification.residualRisks.filter((item) => String(item.id || '').startsWith('verify-cloud-'))) {
+    const item = document.createElement('p');
+    item.textContent = `Still in the clean copy: ${friendlyFinding(finding).title}.`;
+    ui['verification-checks'].append(item);
+  }
 }
 
 function renderReceipt() {
@@ -613,6 +665,8 @@ function renderVideoAdvanced() {
   const isVideo = state.file?.type.startsWith('video/');
   ui['video-advanced'].hidden = !isVideo;
   if (!isVideo) return;
+  ui['verify-clean-video-button'].hidden = !state.remoteVideo?.ready;
+  ui['verify-clean-video-button'].disabled = !state.remoteVideo?.ready;
   if (!state.previewUrl) state.previewUrl = URL.createObjectURL(state.file);
   ui['video-preview'].replaceChildren();
   const preview = document.createElement('video');
