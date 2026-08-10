@@ -20,6 +20,8 @@ test('production Worker configuration binds private media storage and a durable 
 test('Starsaintf production workflow requires only its Cloudflare deploy token', async () => {
   const workflow = await fs.readFile(workflowUrl, 'utf8');
   assert.match(workflow, /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
+  assert.match(workflow, /Missing CLOUDFLARE_API_TOKEN in the production environment/);
+  assert.match(workflow, /wrangler whoami/);
   assert.doesNotMatch(workflow, /RENVOY_IDENTITY_VERIFICATION_URL: \$\{\{ secrets\./);
   assert.doesNotMatch(workflow, /PROCESSOR_AUTH_TOKEN: \$\{\{ secrets\./);
   assert.doesNotMatch(workflow, /VIDEO_PROCESSOR_URL: \$\{\{ secrets\./);
