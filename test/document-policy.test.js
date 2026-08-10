@@ -60,7 +60,7 @@ test('normalizes Office labels without exposing extracted private values', () =>
   assert.equal(JSON.stringify(finding).includes('Reception MFP 2'), false);
 });
 
-test('creates a document plan that makes unsafe transformations unavailable', () => {
+test('offers signature removal while marking only font removal as unavailable', () => {
   const findings = normalizeDocumentFindings('office', [
     { category: 'author' },
     { category: 'signature' },
@@ -71,7 +71,7 @@ test('creates a document plan that makes unsafe transformations unavailable', ()
   assert.equal(plan.state, 'requires-processor');
   assert.deepEqual(plan.actions.map(({ category, action, state }) => ({ category, action, state })), [
     { category: 'author', action: 'remove', state: 'supported' },
-    { category: 'signature', action: 'remove', state: 'unavailable' },
+    { category: 'signature', action: 'remove', state: 'supported' },
     { category: 'font', action: 'remove', state: 'unavailable' },
   ]);
   assert.match(plan.output.reason, /configured document-cleaning processor/i);

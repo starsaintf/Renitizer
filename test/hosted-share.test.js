@@ -5,6 +5,7 @@ import { createHostedShare, downloadHostedShare, revokeHostedShare } from '../sr
 
 const session = { endpoint: 'https://renitizer.example', capability: 'opaque-capability_123456' };
 const envelope = { format: 'renitizer-encrypted-package-v1', algorithm: 'AES-GCM', iv: 'iv', ciphertext: 'ciphertext' };
+const testNow = () => Date.parse('2026-08-01T12:00:00.000Z');
 
 test('uploads only an opaque encrypted package with the Renvoy capability', async () => {
   let request;
@@ -13,6 +14,7 @@ test('uploads only an opaque encrypted package with the Renvoy capability', asyn
     envelope,
     recipientAccountId: 'acct_renvoy_bob',
     expiresAt: '2026-08-09T12:00:00.000Z',
+    now: testNow,
     FileCtor: File,
     fetcher: async (url, options) => {
       request = { url, options };
@@ -30,8 +32,8 @@ test('uploads only an opaque encrypted package with the Renvoy capability', asyn
 });
 
 test('rejects an invalid recipient or recovery secret before uploading', async () => {
-  await assert.rejects(() => createHostedShare({ session, envelope, recipientAccountId: 'not-an-account', expiresAt: '2026-08-09T12:00:00.000Z', FileCtor: File }), /recipient/i);
-  await assert.rejects(() => createHostedShare({ session, envelope: { ...envelope, recoveryKey: 'secret' }, recipientAccountId: 'acct_renvoy_bob', expiresAt: '2026-08-09T12:00:00.000Z', FileCtor: File }), /recovery key/i);
+  await assert.rejects(() => createHostedShare({ session, envelope, recipientAccountId: 'not-an-account', expiresAt: '2026-08-09T12:00:00.000Z', now: testNow, FileCtor: File }), /recipient/i);
+  await assert.rejects(() => createHostedShare({ session, envelope: { ...envelope, recoveryKey: 'secret' }, recipientAccountId: 'acct_renvoy_bob', expiresAt: '2026-08-09T12:00:00.000Z', now: testNow, FileCtor: File }), /recovery key/i);
 });
 
 test('validates hosted-share expiry against an injected current time', async () => {

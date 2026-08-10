@@ -51,7 +51,6 @@ const FINDING_COPY = {
 };
 
 const UNAVAILABLE_ACTIONS = new Map([
-  ['signature', 'Removing a signature can invalidate the document and needs a dedicated processor.'],
   ['font', 'Removing embedded fonts can change how the document looks and needs a dedicated processor.'],
 ]);
 
