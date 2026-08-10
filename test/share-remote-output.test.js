@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { File } from 'node:buffer';
 import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from '../src/share/remote-output.js';
+import * as remoteOutput from '../src/share/remote-output.js';
 
 test('prefers a browser-created clean file without fetching a remote job', async () => {
   const cleanFile = new File(['clean'], 'photo-clean.jpg', { type: 'image/jpeg' });
@@ -53,4 +54,16 @@ test('replaces an identifying clean filename before package encryption', async (
   assert.equal(packageFile.name, 'renitizer-clean-copy.jpg');
   assert.equal(packageFile.type, 'image/jpeg');
   assert.equal(await packageFile.text(), 'clean pixels');
+});
+
+test('replaces an identifying original filename before local archive encryption', async () => {
+  assert.equal(typeof remoteOutput.createGenericOriginalArchiveFile, 'function');
+  const archiveFile = remoteOutput.createGenericOriginalArchiveFile(
+    new File(['original pixels'], 'passport-and-home-address.jpeg', { type: 'image/jpeg' }),
+    File,
+  );
+
+  assert.equal(archiveFile.name, 'renitizer-original.jpg');
+  assert.equal(archiveFile.type, 'image/jpeg');
+  assert.equal(await archiveFile.text(), 'original pixels');
 });

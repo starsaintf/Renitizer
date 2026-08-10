@@ -16,7 +16,7 @@ import { getViewFromHash } from './core/view-state.js';
 import { findingStatus, friendlyFinding } from './core/friendly-findings.js';
 import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/crypto.js';
 import { createSafeShareReport, getShareState } from './share/policy.js';
-import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
+import { createGenericOriginalArchiveFile, createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
 import { createHostedShare, createHostedShareLink, downloadHostedShare, isHostedShareId, revokeHostedShare } from './share/hosted.js';
 import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile, setDocumentPlanAction } from './documents/policy.js';
 import { documentReadyCopy, documentUiCopy } from './documents/presentation.js';
@@ -27,8 +27,8 @@ import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'video-coverage-option', 'video-check-coverage', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-link-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
-const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'osint-consent', 'cloud-status', 'video-coverage-option', 'video-check-coverage', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verify-clean-video-button', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'archive-original-button', 'archive-original-key-button', 'archive-original-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-link-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, originalArchive: null, originalArchiveKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
 const shareFromQuery = new URLSearchParams(location.search).get('share');
@@ -51,6 +51,8 @@ ui['share-detailed-findings'].addEventListener('change', resetSharePackage);
 ui['share-package-button'].addEventListener('click', createEncryptedPackage);
 ui['share-key-button'].addEventListener('click', downloadRecoveryKey);
 ui['share-report-button'].addEventListener('click', downloadShareReport);
+ui['archive-original-button'].addEventListener('click', archiveOriginalFile);
+ui['archive-original-key-button'].addEventListener('click', downloadOriginalArchiveKey);
 ui['share-hosted-button'].addEventListener('click', createHostedEncryptedShare);
 ui['share-link-button'].addEventListener('click', copyCurrentShareLink);
 ui['share-revoke-button'].addEventListener('click', revokeCurrentHostedShare);
@@ -81,6 +83,8 @@ async function selectFile(file) {
   state.verification = null;
   state.share = null;
   state.recoveryKeySaved = false;
+  state.originalArchive = null;
+  state.originalArchiveKeySaved = false;
   state.hostedShare = null;
   state.availableChecks = new Set();
   state.documentPlan = null;
@@ -811,6 +815,9 @@ function renderShareSection() {
   ui['share-key-button'].disabled = !state.share;
   ui['share-report-button'].disabled = !shareState.available;
   ui['share-delivery'].textContent = shareState.message;
+  ui['archive-original-button'].disabled = !state.file;
+  ui['archive-original-key-button'].disabled = !state.originalArchive;
+  if (!state.originalArchive) ui['archive-original-status'].textContent = '';
   if (!state.share) ui['share-status'].textContent = '';
   ui['share-hosted-details'].hidden = !state.share;
   ui['share-hosted-button'].disabled = !state.share || !state.recoveryKeySaved;
@@ -855,6 +862,30 @@ function downloadRecoveryKey() {
   download(new Blob([JSON.stringify({ format: 'renitizer-recovery-key-v1', algorithm: 'AES-256-GCM', expiresAt: state.share.envelope.expiresAt, recoveryKey: state.share.recoveryKey }, null, 2)], { type: 'application/json' }), 'renitizer-recovery-key.json', 'application/json');
   state.recoveryKeySaved = true;
   ui['share-status'].textContent = 'Recovery key downloaded. Keep it separate from the encrypted package.';
+  renderShareSection();
+}
+
+async function archiveOriginalFile() {
+  if (!state.file) return;
+  busy(ui['archive-original-button'], 'Encrypting…');
+  try {
+    state.originalArchive = await encryptCleanCopy(createGenericOriginalArchiveFile(state.file));
+    state.originalArchiveKeySaved = false;
+    download(new Blob([JSON.stringify(state.originalArchive.envelope, null, 2)], { type: 'application/json' }), 'renitizer-encrypted-original.json', 'application/json');
+    ui['archive-original-status'].textContent = 'Encrypted original saved. Save its archive key separately.';
+  } catch {
+    ui['archive-original-status'].textContent = 'We could not encrypt the original on this device.';
+  } finally {
+    idle(ui['archive-original-button'], 'Save encrypted original');
+    renderShareSection();
+  }
+}
+
+function downloadOriginalArchiveKey() {
+  if (!state.originalArchive) return;
+  download(new Blob([JSON.stringify({ format: 'renitizer-recovery-key-v1', algorithm: 'AES-256-GCM', purpose: 'original-archive', recoveryKey: state.originalArchive.recoveryKey }, null, 2)], { type: 'application/json' }), 'renitizer-original-recovery-key.json', 'application/json');
+  state.originalArchiveKeySaved = true;
+  ui['archive-original-status'].textContent = 'Archive key saved. Keep it separate from the encrypted original.';
   renderShareSection();
 }
 async function createHostedEncryptedShare() {

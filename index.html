@@ -148,9 +148,15 @@
             <p class="microcopy">Expiry is recorded in the package, but a downloaded file cannot enforce deletion after you send it.</p>
             <label class="consent"><input id="share-detailed-findings" type="checkbox"><span>Include detailed findings in the encrypted privacy report.</span></label>
             <div class="actions"><button id="share-package-button" class="button primary" type="button" disabled>Create &amp; download encrypted package</button><button id="share-key-button" class="button quiet" type="button" disabled>Save recovery key</button><button id="share-report-button" class="text-button" type="button" disabled>Download privacy report</button></div>
-            <p id="share-delivery" class="microcopy"></p>
-            <p id="share-status" class="microcopy" aria-live="polite"></p>
-            <details id="share-hosted-details" class="verification-details" hidden>
+                <p id="share-delivery" class="microcopy"></p>
+                <p id="share-status" class="microcopy" aria-live="polite"></p>
+                <details class="verification-details">
+                  <summary>Keep an encrypted original</summary>
+                  <p>Save a separate encrypted copy of your original on this device. It is never sent.</p>
+                  <div class="actions"><button id="archive-original-button" class="button quiet" type="button">Save encrypted original</button><button id="archive-original-key-button" class="text-button" type="button" disabled>Save archive key</button></div>
+                  <p id="archive-original-status" class="microcopy" aria-live="polite"></p>
+                </details>
+                <details id="share-hosted-details" class="verification-details" hidden>
               <summary>Send privately with Renvoy</summary>
               <p>Renvoy stores only your encrypted package for one person. Save the recovery key first, then send that key separately.</p>
               <label class="field-label" for="share-recipient-account">Recipient’s Renvoy account</label>

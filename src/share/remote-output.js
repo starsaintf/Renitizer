@@ -23,9 +23,17 @@ export async function resolveShareableCleanOutput({ cleanFile = null, remoteVide
 }
 
 export function createGenericPackageFile(cleanOutput, FileCtor = File) {
-  if (!cleanOutput || typeof cleanOutput.arrayBuffer !== 'function' || typeof FileCtor !== 'function') throw new Error('The clean output cannot be prepared for sharing.');
-  const mimeType = cleanOutput.type || 'application/octet-stream';
-  return new FileCtor([cleanOutput], `renitizer-clean-copy${extensionForMimeType(mimeType)}`, { type: mimeType });
+  return createGenericFile(cleanOutput, 'renitizer-clean-copy', FileCtor);
+}
+
+export function createGenericOriginalArchiveFile(originalFile, FileCtor = File) {
+  return createGenericFile(originalFile, 'renitizer-original', FileCtor);
+}
+
+function createGenericFile(file, baseName, FileCtor) {
+  if (!file || typeof file.arrayBuffer !== 'function' || typeof FileCtor !== 'function') throw new Error('The file cannot be prepared for encrypted storage.');
+  const mimeType = file.type || 'application/octet-stream';
+  return new FileCtor([file], `${baseName}${extensionForMimeType(mimeType)}`, { type: mimeType });
 }
 
 function extensionForMimeType(mimeType) {
