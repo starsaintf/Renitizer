@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 import subprocess
 import sys
+import inspect
 
 from office import sanitize_office
 
@@ -70,6 +71,30 @@ class OfficeSanitizerTests(unittest.TestCase):
             self.assertTrue(output.exists())
             with zipfile.ZipFile(output) as archive:
                 self.assertNotIn('docProps/core.xml', archive.namelist())
+
+    def test_removes_only_the_selected_private_package_category(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'input.docx'
+            output = Path(directory) / 'output.docx'
+            with zipfile.ZipFile(source, 'w') as archive:
+                archive.writestr('[Content_Types].xml', '<Types/>')
+                archive.writestr('docProps/core.xml', '<coreProperties><creator>Ada</creator></coreProperties>')
+                archive.writestr('word/comments.xml', '<comments><comment>Private note</comment></comments>')
+                archive.writestr('word/fonts/font1.odttf', b'font')
+                archive.writestr('word/document.xml', DOCUMENT)
+                archive.writestr('word/_rels/document.xml.rels', '''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rComment" Type="comments" Target="comments.xml"/>
+                </Relationships>''')
+
+            self.assertIn('remove_categories', inspect.signature(sanitize_office).parameters)
+            result = sanitize_office(source, output, remove_categories={'comment'})
+
+            self.assertEqual(result['removed'], ['comments'])
+            with zipfile.ZipFile(output) as archive:
+                names = set(archive.namelist())
+                self.assertIn('docProps/core.xml', names)
+                self.assertNotIn('word/comments.xml', names)
+                self.assertIn('word/fonts/font1.odttf', names)
 
 
 if __name__ == '__main__':

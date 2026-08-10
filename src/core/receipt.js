@@ -30,6 +30,13 @@ export function createReceipt({ findings = [], report = {}, verification = null,
     }
   }
   if (documentCleaning?.state === 'processor-unconfigured' && documentCleaning.message) notChecked.push(documentCleaning.message);
+  if (documentCleaning?.cleanDocumentProduced) {
+    changed.push('Created: Private clean document');
+    for (const category of documentCleaning.removedCategories || []) changed.push(`Removed: ${documentCategoryLabel(category)}`);
+    for (const action of documentCleaning.actions || []) {
+      if (action?.state === 'supported' && action.action === 'keep') kept.push(`Kept: ${documentCategoryLabel(action.category)}`);
+    }
+  }
 
   return {
     format: 'renitizer-cleaning-receipt-v1',
@@ -44,6 +51,17 @@ export function createReceipt({ findings = [], report = {}, verification = null,
 }
 
 function findingLabel(finding) { return String(finding?.title || finding?.detail || 'A private detail').trim(); }
+function documentCategoryLabel(category) {
+  return ({
+    metadata: 'Author, company and device details',
+    comment: 'Comments and notes',
+    revision: 'Edit history',
+    'hidden-object': 'Hidden and embedded content',
+    signature: 'Digital signatures',
+    thumbnail: 'Preview thumbnail',
+    font: 'Embedded fonts',
+  })[category] || 'Private document detail';
+}
 function friendlyCheckName(check) { return ({ metadata: 'Metadata', visibleText: 'Visible text', barcodes: 'Barcodes', faces: 'Faces', visualRedactions: 'Visual redactions', cloud: 'Cloud assessment' })[check] || check; }
 function makeSummary(changed, kept, notChecked) {
   const parts = [

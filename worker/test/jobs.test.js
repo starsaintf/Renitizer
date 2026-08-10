@@ -46,6 +46,7 @@ test('validates metadata-only document-cleaning job requests', () => {
     mediaKind: 'document',
     documentType: 'pdf',
     fileName: 'contract.pdf',
+    documentSelection: 'fixed',
     requestedActions: ['remove-author', 'remove-comment'],
   }), { valid: true, value: {
     kind: 'document-cleaning',
@@ -54,6 +55,7 @@ test('validates metadata-only document-cleaning job requests', () => {
     fileName: 'contract.pdf',
     mimeType: null,
     sizeBytes: null,
+    documentSelection: 'fixed',
     requestedActions: ['remove-author', 'remove-comment'],
   } });
 });
@@ -457,6 +459,47 @@ test('queue consumer accepts a legacy Office clean returned as a sanitized PDF',
     key: documentOutputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id, documentType: 'office' }),
     contentType: 'application/pdf',
     documentType: 'pdf',
+  });
+});
+
+test('queue consumer passes selected Office choices through and records the processor-confirmed removals', async () => {
+  const record = createStoredJob({
+    kind: 'document-cleaning', mediaKind: 'document', documentType: 'office', fileName: 'board-notes.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', sizeBytes: 3,
+    documentSelection: 'explicit',
+    requestedActions: ['remove-comment', 'remove-signature'],
+  }, 'acct_renvoy_alice', () => 'job_selected_office', () => '2026-07-19T00:00:00.000Z');
+  const recordKey = jobRecordKey({ ownerAccountId: record.ownerAccountId, jobId: record.id });
+  let current = record;
+  const bucket = {
+    async get(key) {
+      if (key === recordKey) return { json: async () => current };
+      if (key === record.input.key) return { body: new Blob(['raw']).stream() };
+      return null;
+    },
+    async put(key, body) { if (key === recordKey) current = JSON.parse(body); },
+  };
+  const testWorker = createWorker({ processorFetcher: async (_url, options) => {
+    assert.equal(options.headers['X-Renitizer-Requested-Actions'], '["remove-comment","remove-signature"]');
+    return new Response(new Blob(['clean']).stream(), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Renitizer-Document-Type': 'office',
+        'X-Renitizer-Removed-Categories': 'comment,signature',
+      },
+    });
+  } });
+  let acknowledged = false;
+  await testWorker.queue({
+    messages: [{ body: { version: 1, jobId: record.id, ownerAccountId: record.ownerAccountId }, ack() { acknowledged = true; } }],
+  }, { MEDIA_BUCKET: bucket, DOCUMENT_PROCESSOR_URL: 'https://documents.example/v1/clean/document', PROCESSOR_AUTH_TOKEN: 'processor-secret' });
+
+  assert.equal(acknowledged, true);
+  assert.deepEqual(current.output, {
+    key: documentOutputObjectKey({ ownerAccountId: record.ownerAccountId, jobId: record.id, documentType: 'office' }),
+    contentType: 'application/octet-stream',
+    documentType: 'office',
+    removedCategories: ['comment', 'signature'],
   });
 });
 

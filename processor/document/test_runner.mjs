@@ -23,6 +23,29 @@ test('runs Office cleaning with the packaged sanitizer script', async () => {
   assert.deepEqual(calls, [{ command: 'python3', args: ['/app/office.py', '/tmp/input', '/tmp/output'] }]);
 });
 
+test('passes only the chosen modern Office categories to the package cleaner', async () => {
+  const calls = [];
+  const result = await runDocumentSanitizer({
+    documentType: 'office', sourceExtension: 'docx', inputPath: '/tmp/input.docx', outputPath: '/tmp/output.docx', officeScriptPath: '/app/office.py',
+    requestedActions: ['remove-comment', 'remove-signature'],
+    execute: async (command, args) => { calls.push({ command, args }); return '{"removed":["comments","signatures"]}'; },
+  });
+
+  assert.deepEqual(calls, [{ command: 'python3', args: ['/app/office.py', '/tmp/input.docx', '/tmp/output.docx', '--remove', 'comment', 'signature'] }]);
+  assert.deepEqual(result.removedCategories, ['comment', 'signature']);
+});
+
+test('preserves every selectable Office category when the user chooses keep for all of them', async () => {
+  const calls = [];
+  await runDocumentSanitizer({
+    documentType: 'office', sourceExtension: 'docx', inputPath: '/tmp/input.docx', outputPath: '/tmp/output.docx', officeScriptPath: '/app/office.py',
+    requestedActions: [],
+    execute: async (command, args) => { calls.push({ command, args }); return '{"removed":[]}'; },
+  });
+
+  assert.deepEqual(calls, [{ command: 'python3', args: ['/app/office.py', '/tmp/input.docx', '/tmp/output.docx', '--remove'] }]);
+});
+
 test('plans a LibreOffice PDF fallback for legacy and OpenDocument files', () => {
   assert.deepEqual(documentSanitizationPlan({ documentType: 'office', sourceExtension: 'doc' }), {
     strategy: 'libreoffice-pdf', outputDocumentType: 'pdf', outputExtension: 'pdf',

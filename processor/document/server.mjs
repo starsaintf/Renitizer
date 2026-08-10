@@ -10,6 +10,7 @@ import { normalizeDocumentType } from './contract.mjs';
 const port = Number(process.env.PORT ?? 8080);
 const secret = process.env.PROCESSOR_AUTH_TOKEN ?? '';
 const maxBytes = Number(process.env.MAX_DOCUMENT_BYTES ?? 100 * 1024 * 1024);
+const SELECTABLE_ACTIONS = new Set(['remove-metadata', 'remove-comment', 'remove-revision', 'remove-hidden-object', 'remove-signature', 'remove-thumbnail', 'remove-font']);
 
 if (!secret) throw new Error('PROCESSOR_AUTH_TOKEN is required.');
 
@@ -23,9 +24,11 @@ createServer(async (request, response) => {
   if (!validContentType(documentType, request.headers['content-type'])) return send(response, 415, 'Unexpected document content type');
   let sourceExtension;
   let plan;
+  let requestedActions;
   try {
     sourceExtension = sourceExtensionFor(documentType, request.headers['x-renitizer-document-extension']);
     plan = documentSanitizationPlan({ documentType, sourceExtension });
+    requestedActions = parseRequestedActions(request.headers['x-renitizer-requested-actions']);
   } catch { return send(response, 400, 'Unsupported document format'); }
   const length = Number(request.headers['content-length'] ?? 0);
   if (!Number.isFinite(length) || length < 1 || length > maxBytes) return send(response, 413, 'Document is too large');
@@ -34,11 +37,12 @@ createServer(async (request, response) => {
   const output = join(directory, `output.${plan.outputExtension}`);
   try {
     await writeBounded(request, input, maxBytes);
-    const result = await runDocumentSanitizer({ documentType, sourceExtension, inputPath: input, outputPath: output });
+    const result = await runDocumentSanitizer({ documentType, sourceExtension, inputPath: input, outputPath: output, requestedActions });
     if ((await stat(output)).size < 1) throw new Error('The document processor produced an empty output.');
     response.writeHead(200, {
       'Content-Type': result.outputDocumentType === 'pdf' ? 'application/pdf' : 'application/octet-stream',
       'X-Renitizer-Document-Type': result.outputDocumentType,
+      ...(result.removedCategories?.length ? { 'X-Renitizer-Removed-Categories': result.removedCategories.join(',') } : {}),
       'Cache-Control': 'no-store',
     });
     await pipeline(createReadStream(output), response);
@@ -70,6 +74,16 @@ function sourceExtensionFor(documentType, value) {
   const extension = String(value || '').trim().replace(/^\./, '').toLowerCase();
   if (!/^[a-z0-9]{1,12}$/.test(extension)) throw new Error('Document extension is invalid.');
   return extension;
+}
+
+function parseRequestedActions(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length > 1024) throw new Error('Document choices are invalid.');
+  const actions = JSON.parse(value);
+  if (!Array.isArray(actions) || actions.length > SELECTABLE_ACTIONS.size || actions.some((action) => !SELECTABLE_ACTIONS.has(action))) {
+    throw new Error('Document choices are invalid.');
+  }
+  return actions;
 }
 
 async function writeBounded(source, destination, limit) {

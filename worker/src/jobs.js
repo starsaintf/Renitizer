@@ -5,7 +5,7 @@ export const MEDIA_KINDS = ['image', 'video', 'audio', 'document'];
 export const JOB_KINDS = ['media-analysis', 'document-cleaning', 'video-redaction'];
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
-const METADATA_FIELDS = new Set(['kind', 'mediaKind', 'documentType', 'fileName', 'mimeType', 'sizeBytes', 'requestedActions', 'redactions']);
+const METADATA_FIELDS = new Set(['kind', 'mediaKind', 'documentType', 'fileName', 'mimeType', 'sizeBytes', 'documentSelection', 'requestedActions', 'redactions']);
 const RAW_CONTENT_FIELDS = new Set(['content', 'file', 'data', 'base64', 'bytes', 'raw', 'body']);
 const DOCUMENT_TYPES = ['pdf', 'office'];
 const ALLOWED_TRANSITIONS = {
@@ -43,6 +43,7 @@ export function validateJobRequest(input) {
   if (kind === 'video-redaction' && input.mediaKind !== 'video') errors.push('video-redaction jobs must use mediaKind video.');
   if (input.documentType !== undefined && !DOCUMENT_TYPES.includes(input.documentType)) errors.push(`documentType must be one of: ${DOCUMENT_TYPES.join(', ')}.`);
   if (kind === 'document-cleaning' && !DOCUMENT_TYPES.includes(input.documentType)) errors.push(`documentType must be one of: ${DOCUMENT_TYPES.join(', ')}.`);
+  if (input.documentSelection !== undefined && !['fixed', 'explicit'].includes(input.documentSelection)) errors.push('documentSelection must be fixed or explicit.');
   if (input.requestedActions !== undefined && (!Array.isArray(input.requestedActions) || input.requestedActions.some((action) => !isString(action) || !/^remove-[a-z-]+$/.test(action)))) {
     errors.push('requestedActions must be an array of remove-* action names.');
   }
@@ -70,6 +71,7 @@ export function validateJobRequest(input) {
   };
   if (input.kind !== undefined) value.kind = kind;
   if (input.documentType !== undefined) value.documentType = input.documentType;
+  if (input.documentSelection !== undefined) value.documentSelection = input.documentSelection;
   if (input.requestedActions !== undefined) value.requestedActions = input.requestedActions;
   if (kind === 'video-redaction') value.redactions = normalizedRedactions;
   return { valid: true, value };
@@ -83,6 +85,7 @@ export function createJob(metadata, createId = defaultId, now = () => new Date()
     kind: metadata.kind ?? 'media-analysis',
     mediaKind: metadata.mediaKind,
     documentType: metadata.documentType ?? null,
+    documentSelection: metadata.documentSelection ?? 'fixed',
     fileName: metadata.fileName ?? null,
     mimeType: metadata.mimeType ?? null,
     sizeBytes: metadata.sizeBytes ?? null,
@@ -161,7 +164,7 @@ export function serializeJobStatus(job, configuration) {
     job: {
       id: job.id,
       state: job.state,
-      ...(job.kind === 'document-cleaning' ? { kind: job.kind, documentType: job.documentType, requestedActions: job.requestedActions } : {}),
+      ...(job.kind === 'document-cleaning' ? { kind: job.kind, documentType: job.documentType, documentSelection: job.documentSelection, requestedActions: job.requestedActions } : {}),
       ...(job.kind === 'video-redaction' ? { kind: job.kind, redactionCount: job.redactions.length } : {}),
       mediaKind: job.mediaKind,
       fileName: job.fileName,
@@ -169,7 +172,7 @@ export function serializeJobStatus(job, configuration) {
       sizeBytes: job.sizeBytes,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
-      ...(job.output ? { output: { available: true, mimeType: job.output.contentType, ...(job.output.documentType ? { documentType: job.output.documentType } : {}) } } : {}),
+      ...(job.output ? { output: { available: true, mimeType: job.output.contentType, ...(job.output.documentType ? { documentType: job.output.documentType } : {}), ...(job.output.removedCategories ? { removedCategories: job.output.removedCategories } : {}) } } : {}),
       ...(job.failure ? { failure: job.failure } : {}),
     },
     processing: configuration,

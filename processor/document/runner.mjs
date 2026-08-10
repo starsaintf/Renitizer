@@ -8,6 +8,15 @@ import { buildPdfSanitizeCommand, normalizeDocumentType } from './contract.mjs';
 const defaultOfficeScript = fileURLToPath(new URL('./office.py', import.meta.url));
 const OOXML_EXTENSIONS = new Set(['docx', 'docm', 'dotx', 'dotm', 'xlsx', 'xlsm', 'xltx', 'xltm', 'pptx', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm']);
 const LIBREOFFICE_PDF_EXTENSIONS = new Set(['doc', 'xls', 'ppt', 'odt', 'ods', 'odp', 'rtf']);
+const REQUESTED_CATEGORY_MAP = new Map([
+  ['author', 'metadata'], ['device-identifier', 'metadata'], ['metadata', 'metadata'],
+  ['comment', 'comment'], ['revision', 'revision'], ['hidden-object', 'hidden-object'],
+  ['signature', 'signature'], ['thumbnail', 'thumbnail'], ['font', 'font'],
+]);
+const REMOVED_CATEGORY_MAP = new Map([
+  ['document-properties', 'metadata'], ['comments', 'comment'], ['revisions', 'revision'],
+  ['embedded-objects', 'hidden-object'], ['signatures', 'signature'], ['thumbnails', 'thumbnail'], ['embedded-fonts', 'font'],
+]);
 
 export function documentSanitizationPlan({ documentType, sourceExtension } = {}) {
   const normalizedType = normalizeDocumentType(documentType);
@@ -22,15 +31,17 @@ export function documentSanitizationPlan({ documentType, sourceExtension } = {})
   throw new Error('Unsupported Office document extension.');
 }
 
-export async function runDocumentSanitizer({ documentType, sourceExtension, inputPath, outputPath, execute = runCommand, officeScriptPath = defaultOfficeScript }) {
+export async function runDocumentSanitizer({ documentType, sourceExtension, inputPath, outputPath, requestedActions, execute = runCommand, officeScriptPath = defaultOfficeScript }) {
   const plan = documentSanitizationPlan({ documentType, sourceExtension });
   if (plan.strategy === 'qpdf') {
     await execute('qpdf', buildPdfSanitizeCommand(inputPath, outputPath));
     return plan;
   }
   if (plan.strategy === 'office-package') {
-    await execute('python3', [officeScriptPath, inputPath, outputPath]);
-    return plan;
+    const selectedCategories = selectedOfficeCategories(requestedActions);
+    const selectionArguments = requestedActions === undefined ? [] : ['--remove', ...selectedCategories];
+    const result = await execute('python3', [officeScriptPath, inputPath, outputPath, ...selectionArguments]);
+    return { ...plan, removedCategories: removedOfficeCategories(result) };
   }
   const outputDirectory = dirname(outputPath);
   const convertedPdf = join(outputDirectory, `${basename(inputPath, extname(inputPath))}.pdf`);
@@ -42,6 +53,23 @@ export async function runDocumentSanitizer({ documentType, sourceExtension, inpu
   return plan;
 }
 
+function selectedOfficeCategories(actions) {
+  const selected = [];
+  for (const action of Array.isArray(actions) ? actions : []) {
+    const category = REQUESTED_CATEGORY_MAP.get(String(action).replace(/^remove-/, ''));
+    if (category && !selected.includes(category)) selected.push(category);
+  }
+  return selected;
+}
+
+function removedOfficeCategories(result) {
+  try {
+    const removed = JSON.parse(String(result || '{}'))?.removed;
+    if (!Array.isArray(removed)) return [];
+    return removed.map((reason) => REMOVED_CATEGORY_MAP.get(String(reason))).filter(Boolean);
+  } catch { return []; }
+}
+
 function normalizeSourceExtension(value) {
   const extension = String(value || '').replace(/^\./, '').toLowerCase();
   if (!extension) return '';
@@ -51,10 +79,12 @@ function normalizeSourceExtension(value) {
 
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { shell: false, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(command, args, { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.once('error', reject);
-    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with code ${code}: ${stderr.slice(0, 500)}`)));
+    child.once('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`${command} exited with code ${code}: ${stderr.slice(0, 500)}`)));
   });
 }

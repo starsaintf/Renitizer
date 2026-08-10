@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as documentPolicy from '../src/documents/policy.js';
 import {
   createDocumentCleaningJobRequest,
   createDocumentCleaningReport,
@@ -77,6 +78,39 @@ test('offers signature removal while marking only font removal as unavailable', 
   assert.match(plan.output.reason, /configured document-cleaning processor/i);
 });
 
+test('shows an editable privacy-cleaning plan for a modern Office package', () => {
+  const plan = createDocumentSanitizationPlan('office', [], { sourceExtension: 'docx' });
+
+  assert.equal(plan.mode, 'selectable');
+  assert.deepEqual(plan.actions.map(({ category, action, state }) => ({ category, action, state })), [
+    { category: 'metadata', action: 'remove', state: 'supported' },
+    { category: 'comment', action: 'remove', state: 'supported' },
+    { category: 'revision', action: 'remove', state: 'supported' },
+    { category: 'hidden-object', action: 'remove', state: 'supported' },
+    { category: 'signature', action: 'remove', state: 'supported' },
+    { category: 'thumbnail', action: 'remove', state: 'supported' },
+    { category: 'font', action: 'remove', state: 'supported' },
+  ]);
+});
+
+test('lets a person keep one selectable Office category without changing the rest', () => {
+  assert.equal(typeof documentPolicy.setDocumentPlanAction, 'function');
+  const initial = createDocumentSanitizationPlan('office', [], { sourceExtension: 'pptx' });
+  const plan = documentPolicy.setDocumentPlanAction(initial, 'font', 'keep');
+
+  assert.equal(plan.actions.find(({ category }) => category === 'font')?.action, 'keep');
+  assert.equal(plan.actions.find(({ category }) => category === 'signature')?.action, 'remove');
+});
+
+test('marks an all-keep modern Office request as an explicit choice', () => {
+  let plan = createDocumentSanitizationPlan('office', [], { sourceExtension: 'xlsx' });
+  for (const { category } of plan.actions) plan = documentPolicy.setDocumentPlanAction(plan, category, 'keep');
+  const request = createDocumentCleaningJobRequest({ name: 'budget.xlsx', type: '', size: 64 }, plan);
+
+  assert.equal(request.documentSelection, 'explicit');
+  assert.deepEqual(request.requestedActions, []);
+});
+
 test('creates a metadata-only document-cleaning job request', () => {
   const request = createDocumentCleaningJobRequest({
     name: 'board-notes.docx',
@@ -91,6 +125,7 @@ test('creates a metadata-only document-cleaning job request', () => {
     fileName: 'board-notes.docx',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     sizeBytes: 1024,
+    documentSelection: 'fixed',
     requestedActions: ['remove-comment'],
   });
   assert.equal('file' in request, false);
@@ -119,4 +154,17 @@ test('makes a safe document report without claiming an output exists', () => {
     actions: [{ category: 'author', action: 'remove', state: 'supported' }],
   });
   assert.equal(JSON.stringify(report).includes('fileName'), false);
+});
+
+test('records only processor-confirmed document removals after a clean copy is complete', () => {
+  const plan = createDocumentSanitizationPlan('office', [], { sourceExtension: 'docx' });
+  const report = createDocumentCleaningReport({
+    plan,
+    processor: { state: 'configured', available: true },
+    output: { state: 'complete', removedCategories: ['comment', 'signature'] },
+  });
+
+  assert.equal(report.state, 'complete');
+  assert.equal(report.cleanDocumentProduced, true);
+  assert.deepEqual(report.removedCategories, ['comment', 'signature']);
 });

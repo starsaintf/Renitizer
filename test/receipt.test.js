@@ -51,3 +51,20 @@ test('keeps an informational resolved finding out of the kept list', () => {
   assert.deepEqual(receipt.changed, []);
   assert.deepEqual(receipt.kept, []);
 });
+
+test('records a completed document clean from processor-confirmed categories only', () => {
+  const receipt = createReceipt({
+    findings: [],
+    report: { counts: { total: 0, resolved: 0, unresolved: 0 } },
+    documentCleaning: {
+      state: 'complete',
+      cleanDocumentProduced: true,
+      removedCategories: ['comment', 'signature'],
+      actions: [{ category: 'font', action: 'keep', state: 'supported' }],
+    },
+  });
+
+  assert.deepEqual(receipt.changed, ['Created: Private clean document', 'Removed: Comments and notes', 'Removed: Digital signatures']);
+  assert.deepEqual(receipt.kept, ['Kept: Embedded fonts']);
+  assert.equal(receipt.summary, '3 changes made · 1 item kept');
+});

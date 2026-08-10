@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import argparse
+import json
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -11,12 +12,23 @@ MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
 WORD_NS = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
 UNWRAP_REVISIONS = {WORD_NS + tag for tag in ('ins', 'moveTo')}
 REMOVE_REVISIONS = {WORD_NS + tag for tag in ('del', 'moveFrom', 'moveFromRangeStart', 'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd')}
+CATEGORY_REASONS = {
+    'metadata': {'document-properties'},
+    'comment': {'comments'},
+    'revision': {'revisions'},
+    'hidden-object': {'embedded-objects'},
+    'signature': {'signatures'},
+    'thumbnail': {'thumbnails'},
+    'font': {'embedded-fonts'},
+}
+ALL_PRIVATE_REASONS = set().union(*CATEGORY_REASONS.values())
 
 
-def sanitize_office(source, output):
+def sanitize_office(source, output, remove_categories=None):
     """Write an Office package without common private document structures."""
     source = Path(source)
     output = Path(output)
+    selected_reasons = _selected_reasons(remove_categories)
     removed = set()
     with zipfile.ZipFile(source, 'r') as input_archive:
         entries = input_archive.infolist()
@@ -24,20 +36,28 @@ def sanitize_office(source, output):
         with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as output_archive:
             for entry in entries:
                 reason = _private_part_reason(entry.filename)
-                if reason:
+                if reason and reason in selected_reasons:
                     removed.add(reason)
                     continue
                 content = input_archive.read(entry.filename)
-                if _is_word_xml(entry.filename):
+                if _is_word_xml(entry.filename) and 'revisions' in selected_reasons:
                     content, changed = _remove_word_revisions(content)
                     if changed:
                         removed.add('revisions')
                 if entry.filename.lower().endswith('.rels'):
-                    content, changed = _remove_private_relationships(content)
-                    if changed:
-                        removed.update({'comments', 'embedded-fonts', 'embedded-objects', 'signatures'})
+                    content, relationship_reasons = _remove_private_relationships(content, selected_reasons)
+                    removed.update(relationship_reasons)
                 output_archive.writestr(entry.filename, content)
     return {'removed': sorted(removed)}
+
+
+def _selected_reasons(remove_categories):
+    if remove_categories is None:
+        return ALL_PRIVATE_REASONS
+    selected = set()
+    for category in remove_categories:
+        selected.update(CATEGORY_REASONS.get(str(category), set()))
+    return selected
 
 
 def _validate_archive(entries):
@@ -97,27 +117,40 @@ def _rewrite_revisions(parent):
     return changed
 
 
-def _remove_private_relationships(content):
+def _remove_private_relationships(content, selected_reasons):
     try:
         root = ET.fromstring(content)
     except ET.ParseError:
-        return content, False
-    removed = False
-    private_tokens = ('comment', 'person', 'people', 'customxml', 'font', 'embedding', 'activex', 'signature', 'vba')
+        return content, set()
+    removed = set()
     for relationship in list(root):
-        description = f"{relationship.attrib.get('Type', '')} {relationship.attrib.get('Target', '')}".lower()
-        if any(token in description for token in private_tokens):
+        reason = _relationship_reason(relationship)
+        if reason and reason in selected_reasons:
             root.remove(relationship)
-            removed = True
-    return (ET.tostring(root, encoding='utf-8', xml_declaration=True), True) if removed else (content, False)
+            removed.add(reason)
+    return (ET.tostring(root, encoding='utf-8', xml_declaration=True), removed) if removed else (content, removed)
+
+
+def _relationship_reason(relationship):
+    description = f"{relationship.attrib.get('Type', '')} {relationship.attrib.get('Target', '')}".lower()
+    if any(token in description for token in ('comment', 'person', 'people')):
+        return 'comments'
+    if any(token in description for token in ('customxml', 'embedding', 'activex', 'vba')):
+        return 'embedded-objects'
+    if 'font' in description:
+        return 'embedded-fonts'
+    if 'signature' in description:
+        return 'signatures'
+    return None
 
 
 def main():
     parser = argparse.ArgumentParser(description='Remove private structures from an Office Open XML package.')
     parser.add_argument('source')
     parser.add_argument('output')
+    parser.add_argument('--remove', dest='remove_categories', nargs='*', default=None)
     args = parser.parse_args()
-    sanitize_office(args.source, args.output)
+    print(json.dumps(sanitize_office(args.source, args.output, args.remove_categories)))
 
 
 if __name__ == '__main__':

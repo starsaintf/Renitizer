@@ -1,4 +1,10 @@
 const DOCUMENT_TYPES = new Set(['pdf', 'office']);
+const MODERN_OFFICE_EXTENSIONS = new Set(['docx', 'docm', 'dotx', 'dotm', 'xlsx', 'xlsm', 'xltx', 'xltm', 'pptx', 'pptm', 'potx', 'potm', 'ppsx', 'ppsm']);
+const MODERN_OFFICE_CLEANUP_CATEGORIES = ['metadata', 'comment', 'revision', 'hidden-object', 'signature', 'thumbnail', 'font'];
+const FIXED_CLEANUP_CATEGORIES = {
+  pdf: ['metadata', 'comment', 'signature', 'thumbnail'],
+  office: ['metadata', 'comment', 'revision', 'hidden-object', 'signature', 'thumbnail'],
+};
 const DOCUMENT_MIME_TYPES = new Map([
   ['pdf', 'application/pdf'],
   ['doc', 'application/msword'], ['dot', 'application/msword'],
@@ -78,12 +84,14 @@ export function normalizeDocumentFindings(documentType, findings = []) {
   });
 }
 
-export function createDocumentSanitizationPlan(documentType, findings = []) {
+export function createDocumentSanitizationPlan(documentType, findings = [], context = {}) {
   assertDocumentType(documentType);
-  const actions = findings
+  const sourceExtension = normalizeSourceExtension(context?.sourceExtension);
+  const selectable = documentType === 'office' && MODERN_OFFICE_EXTENSIONS.has(sourceExtension);
+  const detectedActions = findings
     .filter((finding) => finding?.documentType === documentType && FINDING_COPY[finding.category])
     .map((finding) => {
-      const unavailableReason = UNAVAILABLE_ACTIONS.get(finding.category);
+      const unavailableReason = unavailableReasonFor(finding.category, selectable);
       return {
         findingId: finding.id,
         category: finding.category,
@@ -92,8 +100,19 @@ export function createDocumentSanitizationPlan(documentType, findings = []) {
         ...(unavailableReason ? { reason: unavailableReason } : {}),
       };
     });
+  const defaultCategories = selectable ? MODERN_OFFICE_CLEANUP_CATEGORIES : FIXED_CLEANUP_CATEGORIES[documentType];
+  const actions = detectedActions.length
+    ? detectedActions
+    : defaultCategories.map((category) => ({
+      findingId: `document-plan-${category}`,
+      category,
+      action: 'remove',
+      state: selectable ? 'supported' : 'fixed',
+    }));
   return {
     documentType,
+    mode: selectable ? 'selectable' : 'fixed',
+    sourceExtension: sourceExtension || null,
     state: 'requires-processor',
     actions,
     output: {
@@ -113,22 +132,39 @@ export function createDocumentCleaningJobRequest(file, plan) {
     fileName: String(file?.name || '').trim() || null,
     mimeType: declaredDocumentMimeType(file),
     sizeBytes: Number.isSafeInteger(file?.size) && file.size >= 0 ? file.size : null,
+    documentSelection: plan?.mode === 'selectable' ? 'explicit' : 'fixed',
     requestedActions: (plan?.actions || [])
       .filter((action) => action.state === 'supported' && action.action === 'remove')
       .map((action) => `remove-${action.category}`),
   };
 }
 
-export function createDocumentCleaningReport({ plan, processor } = {}) {
+export function setDocumentPlanAction(plan, category, action) {
+  if (plan?.mode !== 'selectable') throw new Error('This document format uses one fixed privacy-cleaning step.');
+  if (!['remove', 'keep'].includes(action)) throw new Error('Document choices must be remove or keep.');
+  if (!plan.actions?.some((item) => item.category === category && item.state === 'supported')) throw new Error('That document choice is unavailable.');
+  return {
+    ...plan,
+    actions: plan.actions.map((item) => item.category === category ? { ...item, action } : item),
+  };
+}
+
+export function createDocumentCleaningReport({ plan, processor, output } = {}) {
   const configured = processor?.state === 'configured' && processor?.available === true;
+  const complete = output?.state === 'complete';
+  const knownCategories = new Set((plan?.actions || []).map((action) => action.category));
+  const removedCategories = [...new Set((output?.removedCategories || []).filter((category) => knownCategories.has(category)))];
   return {
     documentType: plan?.documentType || null,
-    state: configured ? 'awaiting-processor' : 'processor-unconfigured',
-    cleanDocumentProduced: false,
-    message: configured
-      ? 'A document-cleaning processor has not returned a clean document yet.'
-      : 'A clean document has not been produced. Configure a document-cleaning processor to continue.',
+    state: complete ? 'complete' : configured ? 'awaiting-processor' : 'processor-unconfigured',
+    cleanDocumentProduced: complete,
+    message: complete
+      ? 'A private clean document has been produced.'
+      : configured
+        ? 'A document-cleaning processor has not returned a clean document yet.'
+        : 'A clean document has not been produced. Configure a document-cleaning processor to continue.',
     actions: (plan?.actions || []).map(({ category, action, state }) => ({ category, action, state })),
+    ...(complete ? { removedCategories } : {}),
   };
 }
 
@@ -149,4 +185,6 @@ function declaredDocumentMimeType(file) {
 }
 
 function normalizeCategory(value) { return CATEGORY_ALIASES.get(String(value || '').trim().toLowerCase()) || null; }
+function normalizeSourceExtension(value) { return String(value || '').trim().replace(/^\./, '').toLowerCase(); }
+function unavailableReasonFor(category, selectable) { return category === 'font' && !selectable ? UNAVAILABLE_ACTIONS.get(category) : null; }
 function assertDocumentType(documentType) { if (!DOCUMENT_TYPES.has(documentType)) throw new Error('documentType must be pdf or office.'); }

@@ -400,11 +400,13 @@ async function renderDocumentJob(job, env, processorFetcher) {
       'Content-Type': job.input.contentType,
       'X-Renitizer-Document-Type': job.documentType,
       'X-Renitizer-Document-Extension': documentInputExtension(job.input.key),
+      ...(job.documentSelection === 'explicit' ? { 'X-Renitizer-Requested-Actions': JSON.stringify(job.requestedActions || []) } : {}),
     },
     body: input.body,
   });
   const responseType = response.headers.get('Content-Type')?.split(';', 1)[0].toLowerCase();
   const outputDocumentType = documentOutputType(response.headers.get('X-Renitizer-Document-Type'), null);
+  const removedCategories = processorRemovedCategories(response.headers.get('X-Renitizer-Removed-Categories'));
   const validResponse = outputDocumentType === 'pdf' ? responseType === 'application/pdf' : outputDocumentType === 'office' && responseType === 'application/octet-stream';
   if (!response.ok || !response.body || !outputDocumentType || !validResponse) throw new Error('Document processor response is invalid.');
   const key = documentOutputObjectKey({ ownerAccountId: job.ownerAccountId, jobId: job.id, documentType: job.documentType });
@@ -412,7 +414,7 @@ async function renderDocumentJob(job, env, processorFetcher) {
   await env.MEDIA_BUCKET.put(key, response.body, { httpMetadata: { contentType } });
   return {
     ...transitionJob(job, 'complete'),
-    output: { key, contentType, documentType: outputDocumentType },
+    output: { key, contentType, documentType: outputDocumentType, ...(removedCategories.length ? { removedCategories } : {}) },
     failure: null,
   };
 }
@@ -437,6 +439,11 @@ function documentOutputType(value, fallback) {
 function documentInputExtension(key) {
   const match = /\.([a-z0-9]{1,12})$/i.exec(String(key || ''));
   return match ? match[1].toLowerCase() : 'bin';
+}
+
+function processorRemovedCategories(value) {
+  const allowed = new Set(['metadata', 'comment', 'revision', 'hidden-object', 'signature', 'thumbnail', 'font']);
+  return [...new Set(String(value || '').split(',').map((category) => category.trim()).filter((category) => allowed.has(category)))];
 }
 
 async function readStoredJob(bucket, ownerAccountId, jobId) {

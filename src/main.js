@@ -18,7 +18,7 @@ import { decryptCleanCopy, encryptCleanCopy, importRecoveryKey } from './share/c
 import { createSafeShareReport, getShareState } from './share/policy.js';
 import { createGenericPackageFile, getShareableCleanOutput, resolveShareableCleanOutput } from './share/remote-output.js';
 import { createHostedShare, downloadHostedShare, revokeHostedShare } from './share/hosted.js';
-import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile } from './documents/policy.js';
+import { createDocumentCleaningJobRequest, createDocumentCleaningReport, createDocumentSanitizationPlan, documentTypeForFile, setDocumentPlanAction } from './documents/policy.js';
 import { documentReadyCopy, documentUiCopy } from './documents/presentation.js';
 import { buildVideoRedactionJobRequest, getVideoReviewItems, normalizeTrackedVideoBoxes, selectVideoFindingAction } from './video/policy.js';
 import { buildVideoSampleTimes } from './video/sampling.js';
@@ -27,7 +27,7 @@ import { requestRenvoySession } from './remote/renvoy-bridge.js';
 import { downloadRemoteJob, getRemoteJob, submitRemoteJob } from './remote/jobs.js';
 
 const $ = (selector) => document.querySelector(selector);
-const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
+const ui = Object.fromEntries(['home-view', 'app-view', 'decrypt-view', 'file-input', 'file-summary', 'scan-button', 'deep-scan-button', 'sanitize-button', 'download-button', 'report-button', 'cloud-button', 'cloud-endpoint', 'cloud-consent', 'cloud-status', 'findings', 'score-summary', 'clean-status', 'sanitize-note', 'save-copy', 'results-step', 'save-step', 'document-plan', 'document-plan-content', 'finding-template', 'redaction-editor', 'redaction-preview', 'add-redaction-button', 'apply-all-button', 'audio-advanced', 'audio-range-list', 'audio-range-start', 'audio-range-end', 'audio-range-action', 'add-audio-range-button', 'video-advanced', 'video-preview', 'video-track-list', 'verification-details', 'verification-checks', 'share-section', 'share-expiry', 'share-detailed-findings', 'share-package-button', 'share-key-button', 'share-report-button', 'share-delivery', 'share-status', 'share-hosted-details', 'share-recipient-account', 'share-hosted-button', 'share-revoke-button', 'share-hosted-status', 'receipt-section', 'receipt-summary', 'receipt-lists', 'receipt-report-button', 'encrypted-package-input', 'recovery-key-input', 'decrypt-package-button', 'decrypt-status', 'receive-hosted-details', 'receive-share-id', 'receive-hosted-button', 'receive-hosted-status'].map((id) => [id, $(`#${id}`)]));
 const state = { file: null, cleanFile: null, findings: [], report: null, receipt: null, receiptReady: false, previewUrl: null, verification: null, availableChecks: new Set(), share: null, recoveryKeySaved: false, hostedShare: null, receivedHostedPackage: null, documentPlan: null, documentRequest: null, documentReport: null, remoteDocument: null, remoteVideo: null, audio: { duration: null, manualRanges: [], processing: null }, video: { duration: null, width: null, height: null } };
 const endpointFromQuery = new URLSearchParams(location.search).get('endpoint');
 if (endpointFromQuery) ui['cloud-endpoint'].value = endpointFromQuery;
@@ -93,7 +93,7 @@ async function selectFile(file) {
   const documentType = documentTypeForFile(file);
   const isDocument = Boolean(documentType);
   if (isDocument) {
-    state.documentPlan = createDocumentSanitizationPlan(documentType);
+    state.documentPlan = createDocumentSanitizationPlan(documentType, [], { sourceExtension: documentSourceExtension(file) });
     state.documentRequest = createDocumentCleaningJobRequest(file, state.documentPlan);
     state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'unconfigured', available: false } });
   }
@@ -108,6 +108,7 @@ async function selectFile(file) {
   ui['save-step'].hidden = true;
   ui['share-section'].hidden = true;
   ui['receipt-section'].hidden = true;
+  renderDocumentPlan();
   ui['clean-status'].textContent = '';
   ui['sanitize-note'].textContent = '';
   ui['save-copy'].textContent = isDocument
@@ -352,10 +353,17 @@ async function refreshRemoteDocument() {
     if (status.job?.state === 'complete') {
       const outputDocumentType = status.job?.output?.documentType || state.documentPlan?.documentType;
       const readyCopy = documentReadyCopy(state.documentPlan?.documentType, outputDocumentType);
+      state.documentReport = createDocumentCleaningReport({
+        plan: state.documentPlan,
+        processor: { state: 'configured', available: true },
+        output: { state: 'complete', removedCategories: status.job?.output?.removedCategories },
+      });
       ui['clean-status'].textContent = readyCopy.status;
       ui['sanitize-note'].textContent = readyCopy.note;
       state.remoteDocument = { ...state.remoteDocument, ready: true, documentType: outputDocumentType };
       ui['download-button'].disabled = false;
+      state.receiptReady = true;
+      updateReport();
     } else if (status.job?.state === 'failed') {
       ui['clean-status'].textContent = 'The private document clean could not finish. Your original was not changed.';
     } else setTimeout(() => { void refreshRemoteDocument(); }, 2500);
@@ -385,6 +393,74 @@ async function cloudScan() {
 
 function updateCloudButton() { ui['cloud-button'].disabled = !state.file || !ui['cloud-consent'].checked; }
 function updateReport() { state.report = { ...makeReport(state.findings), verification: state.verification, ...(state.documentReport ? { documentCleaning: state.documentReport } : {}) }; state.receipt = state.receiptReady ? createReceipt({ findings: state.findings, report: state.report, verification: state.verification, documentCleaning: state.documentReport }) : null; ui['report-button'].disabled = false; ui['results-step'].hidden = false; ui['save-step'].hidden = false; render(); renderReceipt(); renderRedactionPreview(); renderAudioAdvanced(); renderVideoAdvanced(); renderShareSection(); }
+
+function renderDocumentPlan() {
+  const plan = state.documentPlan;
+  ui['document-plan'].hidden = !plan;
+  ui['document-plan-content'].replaceChildren();
+  if (!plan) return;
+  const description = document.createElement('p');
+  description.className = 'document-plan-copy';
+  description.textContent = plan.mode === 'selectable'
+    ? 'Choose what to remove. Anything you keep stays in your original document and in the new copy.'
+    : 'This format is cleaned in one safe step. We will show a receipt after the private cleaner returns your new copy.';
+  const list = document.createElement('div');
+  list.className = 'document-plan-list';
+  const locked = Boolean(state.remoteDocument?.jobId);
+  for (const item of plan.actions) {
+    const row = document.createElement('div');
+    row.className = 'document-plan-item';
+    const copy = documentPlanCopy(item.category);
+    const text = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = copy.title;
+    const detail = document.createElement('span');
+    detail.textContent = copy.detail;
+    text.append(title, detail);
+    row.append(text);
+    if (plan.mode === 'selectable') {
+      const choices = document.createElement('div');
+      choices.className = 'document-plan-choices';
+      for (const action of ['remove', 'keep']) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `document-choice${item.action === action ? ' is-active' : ''}`;
+        button.textContent = action === 'remove' ? 'Remove' : 'Keep';
+        button.disabled = locked;
+        button.setAttribute('aria-pressed', String(item.action === action));
+        button.addEventListener('click', () => {
+          state.documentPlan = setDocumentPlanAction(state.documentPlan, item.category, action);
+          state.documentRequest = createDocumentCleaningJobRequest(state.file, state.documentPlan);
+          state.documentReport = createDocumentCleaningReport({ plan: state.documentPlan, processor: { state: 'unconfigured', available: false } });
+          renderDocumentPlan();
+        });
+        choices.append(button);
+      }
+      row.append(choices);
+    } else {
+      const fixed = document.createElement('span');
+      fixed.className = 'document-plan-fixed';
+      fixed.textContent = 'Cleaned when present';
+      row.append(fixed);
+    }
+    list.append(row);
+  }
+  ui['document-plan-content'].append(description, list);
+}
+
+function documentPlanCopy(category) {
+  return ({
+    metadata: { title: 'Author, company and device details', detail: 'Names and details saved with the document.' },
+    comment: { title: 'Comments and notes', detail: 'Notes that may not appear in the main page.' },
+    revision: { title: 'Edit history', detail: 'Tracked changes and previous edits.' },
+    'hidden-object': { title: 'Hidden and embedded content', detail: 'Hidden items, embedded files, and macros.' },
+    signature: { title: 'Digital signatures', detail: 'Signatures that can identify the signer.' },
+    thumbnail: { title: 'Preview thumbnail', detail: 'A small preview saved inside the document.' },
+    font: { title: 'Embedded fonts', detail: 'Fonts that can identify the document source.' },
+  })[category] || { title: 'Private document detail', detail: 'A detail saved inside the document.' };
+}
+
+function documentSourceExtension(file) { return /\.([a-z0-9]{1,12})$/i.exec(String(file?.name || ''))?.[1]?.toLowerCase() || ''; }
 
 function render() {
   const isImage = state.file?.type.startsWith('image/');
